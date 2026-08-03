@@ -576,6 +576,10 @@ function POS() {
         finalCash = totalSplit; // Store total paid as cash_amount conceptually
         finalChange = Math.max(0, totalSplit - totals.total);
       }
+      
+      const userStr = localStorage.getItem("user");
+      const user = userStr ? JSON.parse(userStr) : null;
+      const cashierName = user ? user.username : 'Unknown';
 
       const { data: transaction, error: txError } = await supabase
         .from('transactions')
@@ -589,7 +593,8 @@ function POS() {
           cash_amount: finalCash,
           change_amount: finalChange,
           total_price: totals.total,
-          date: moment().tz(TIMEZONE).toISOString()
+          date: moment().tz(TIMEZONE).toISOString(),
+          cashier_name: cashierName
         }])
         .select()
         .single();

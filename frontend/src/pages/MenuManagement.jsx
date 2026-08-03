@@ -282,17 +282,11 @@ function MenuManagement() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
         {filteredMenu.map((item) => <div key={item.menu_id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
-            <div className="h-48 bg-blue-50 relative flex items-center justify-center">
-              <span className="text-blue-500 font-bold text-6xl opacity-30 select-none">
-                {item.name ? item.name.charAt(0).toUpperCase() : '?'}
-              </span>
-              <div className="absolute top-2 right-2 bg-white/90 px-2 py-1 rounded-lg text-xs font-bold text-gray-800">
+            <div className="p-4 flex-1 flex flex-col justify-between relative">
+              <div className="absolute top-4 right-4 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-lg text-xs font-bold text-blue-600 dark:text-blue-400">
                 {item.category}
               </div>
-            </div>
-            <div className="p-4 flex-1 flex flex-col justify-between">
               <div>
-                <h3 className="font-bold text-gray-800 text-lg leading-tight mb-1">{item.name}</h3>
                 <p className="text-blue-600 font-bold text-xl mb-4">Rp {item.price.toLocaleString("id-ID")}</p>
                 
                 {item.recipes && item.recipes.length > 0 && <div className="mb-4">

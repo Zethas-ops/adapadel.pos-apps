@@ -223,6 +223,7 @@ function History() {
             <tr className="bg-gray-200 dark:bg-gray-600 border-b border-gray-200 dark:border-gray-700">
               <th className="p-4 font-bold text-gray-600 dark:text-gray-300">ID</th>
               <th className="p-4 font-bold text-gray-600 dark:text-gray-300">Date</th>
+              <th className="p-4 font-bold text-gray-600 dark:text-gray-300">Account</th>
               <th className="p-4 font-bold text-gray-600 dark:text-gray-300">Customer</th>
               <th className="p-4 font-bold text-gray-600 dark:text-gray-300">Table</th>
               <th className="p-4 font-bold text-gray-600 dark:text-gray-300">Total</th>
@@ -239,7 +240,12 @@ function History() {
                       <span>#{t.invoice_no}</span>
                     </div>
                   </td>
-                  <td className="p-4 text-gray-600 dark:text-gray-300">{moment.utc(t.date).tz(TIMEZONE).format("YYYY-MM-DD HH:mm:ss")}</td>
+                  <td className="p-4 text-gray-600 dark:text-gray-300">
+                   {moment.utc(t.date).tz(TIMEZONE).format("YYYY-MM-DD HH:mm:ss")}
+                  </td>
+                  <td className="p-4 text-gray-600 dark:text-gray-300">
+                    {t.cashier_name || "-"}
+                  </td>
                   <td className="p-4 font-medium text-gray-800 dark:text-gray-300">{t.customer_name}</td>
                   <td className="p-4 text-gray-600 dark:text-gray-300">{t.table_no}</td>
                   <td className="p-4 font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">Rp {Number(t.total_price || 0).toLocaleString("id-ID")}</td>
@@ -273,7 +279,7 @@ function History() {
                   </td>
                 </tr>
                 {expandedId === t.transaction_id && <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-100">
-                    <td colSpan={7} className="p-6">
+                    <td colSpan={8} className="p-6">
                       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
                         <h4 className="font-semibold text-gray-800 dark:text-gray-100 mb-4 border-b pb-2">Order Details</h4>
                         <div className="space-y-3">

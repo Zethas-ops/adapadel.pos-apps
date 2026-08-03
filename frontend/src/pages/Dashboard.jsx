@@ -26,6 +26,7 @@ function Dashboard() {
   const [startDate, setStartDate] = useState(initZonedNow.clone().subtract(6, 'days').format("YYYY-MM-DD"));
   const [endDate, setEndDate] = useState(initZonedNow.format("YYYY-MM-DD"));
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [orderType, setOrderType] = useState("");
   const [paymentOptions, setPaymentOptions] = useState([]);
   const userStr = localStorage.getItem("user");
   const user = userStr ? JSON.parse(userStr) : null;
@@ -69,6 +70,9 @@ function Dashboard() {
       if (paymentMethod && paymentMethod !== "All") {
         filteredQuery = filteredQuery.eq('payment_method', paymentMethod);
       }
+      if (orderType && orderType !== "All") {
+        filteredQuery = filteredQuery.eq('table_no', orderType);
+      }
       
       const { data: filteredTxns, error: filteredErr } = await filteredQuery;
       if (filteredErr) throw filteredErr;
@@ -84,6 +88,9 @@ function Dashboard() {
         
       if (paymentMethod && paymentMethod !== "All") {
         metricQuery = metricQuery.eq('payment_method', paymentMethod);
+      }
+      if (orderType && orderType !== "All") {
+        metricQuery = metricQuery.eq('table_no', orderType);
       }
       
       const { data: metricTxns, error: metricErr } = await metricQuery;
@@ -246,7 +253,7 @@ function Dashboard() {
     if (timeRange !== "custom") {
       fetchDashboard();
     }
-  }, [startDate, endDate, paymentMethod, timeRange]);
+    }, [startDate, endDate, paymentMethod, orderType, timeRange]);
   const handleApplyFilter = () => {
     fetchDashboard();
   };
@@ -255,11 +262,20 @@ function Dashboard() {
       const start = moment.tz(`${startDate}T00:00:00.000`, TIMEZONE).toISOString();
       const end = moment.tz(`${endDate}T23:59:59.999`, TIMEZONE).toISOString();
       
-      const { data, error } = await supabase
+      let query = supabase
         .from('transactions')
         .select('*, transaction_items(*)')
         .gte('date', start)
         .lte('date', end);
+
+         if (paymentMethod && paymentMethod !== "All") {
+        query = query.eq('payment_method', paymentMethod);
+      }
+      if (orderType && orderType !== "All") {
+        query = query.eq('table_no', orderType);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       if (!data || data.length === 0) {
@@ -461,6 +477,17 @@ function Dashboard() {
             
             <div className="hidden sm:block w-px h-6 bg-gray-300"></div>
 
+            <select
+    value={orderType}
+    onChange={(e) => setOrderType(e.target.value)}
+    className="bg-transparent text-sm font-medium text-gray-700 outline-none px-2 py-1 cursor-pointer"
+  >
+              <option value="">All Order Types</option>
+              <option value="Cafe">Cafe</option>
+              <option value="Court">Court</option>
+            </select>
+            
+            <div className="hidden sm:block w-px h-6 bg-gray-300"></div>
             <select
     value={timeRange}
     onChange={handleTimeRangeChange}
