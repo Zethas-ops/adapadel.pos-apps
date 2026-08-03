@@ -38,16 +38,16 @@ function Layout() {
   };
 
   const navItems = [
-    { path: "/", label: "Dashboard", icon: <LayoutDashboard size={20} />, permission: null },
-    { path: "/pos", label: "POS", icon: <ShoppingCart size={20} />, permission: "pos" },
-    { path: "/open-bills", label: "Open Bills", icon: <Receipt size={20} />, permission: "open-bills" },
-    { path: "/history", label: "History", icon: <HistoryIcon size={20} />, permission: "history" },
-    { path: "/menu", label: "Menu", icon: <MenuSquare size={20} />, permission: "menu" },
-    { path: "/inventory", label: "Inventory", icon: <Package size={20} />, permission: "inventory" },
-    { path: "/promo", label: "Promo", icon: <Tag size={20} />, permission: "promo" },
-    { path: "/payment-methods", label: "Payment Methods", icon: <CreditCard size={20} />, permission: "payment-methods" },
-    { path: "/roles", label: "Roles", icon: <Users size={20} />, permission: "roles" },
-    { path: "/settings", label: "Settings", icon: <SettingsIcon size={20} />, permission: "settings" },
+    { path: "/", label: "Dashboard", icon: <LayoutDashboard size={24} />, permission: null },
+    { path: "/pos", label: "POS", icon: <ShoppingCart size={24} />, permission: "pos" },
+    { path: "/open-bills", label: "Open Bills", icon: <Receipt size={24} />, permission: "open-bills" },
+    { path: "/history", label: "History", icon: <HistoryIcon size={24} />, permission: "history" },
+    { path: "/menu", label: "Menu", icon: <MenuSquare size={24} />, permission: "menu" },
+    { path: "/inventory", label: "Inventory", icon: <Package size={24} />, permission: "inventory" },
+    { path: "/promo", label: "Promo", icon: <Tag size={24} />, permission: "promo" },
+    { path: "/roles", label: "Roles", icon: <Users size={24} />, permission: "roles" },
+    { path: "/payment-methods", label: "Payment Methods", icon: <CreditCard size={24} />, permission: "payment-methods" },
+    { path: "/settings", label: "Settings", icon: <SettingsIcon size={24} />, permission: "settings" },
   ];
 
   const [theme, setTheme] = React.useState(localStorage.getItem('theme') || 'light');

@@ -65,7 +65,9 @@ function Dashboard() {
         .from('transactions')
         .select('*, transaction_items(*)')
         .gte('date', start)
-        .lte('date', end);
+        .lte('date', end)
+        .not('status', 'eq', 'REFUND')
+        .not('status', 'eq', 'VOID');
       
       if (paymentMethod && paymentMethod !== "All") {
         filteredQuery = filteredQuery.eq('payment_method', paymentMethod);
@@ -84,7 +86,9 @@ function Dashboard() {
         .from('transactions')
         .select('*')
         .gte('date', earliestStart)
-        .lte('date', monthEnd);
+        .lte('date', monthEnd)
+        .not('status', 'eq', 'REFUND')
+        .not('status', 'eq', 'VOID');
         
       if (paymentMethod && paymentMethod !== "All") {
         metricQuery = metricQuery.eq('payment_method', paymentMethod);

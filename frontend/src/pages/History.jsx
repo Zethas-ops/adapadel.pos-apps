@@ -29,6 +29,7 @@ function History() {
   const [refundPassword, setRefundPassword] = useState("");
   const [refundError, setRefundError] = useState("");
   const [isRefunding, setIsRefunding] = useState(false);
+  const [selectedRefundItems, setSelectedRefundItems] = useState({});
 
   const userStr = localStorage.getItem("user");
   const user = userStr ? JSON.parse(userStr) : null;
@@ -124,6 +125,7 @@ function History() {
   const initiateRefund = (transaction, e) => {
     e.stopPropagation();
     setTransactionToRefund(transaction);
+    setSelectedRefundItems(transaction.items.reduce((acc, item) => ({ ...acc, [item.item_id]: 0 }), {}));
     setRefundType("Refund");
     setRefundReason("");
     setRefundPassword("");
@@ -136,6 +138,10 @@ function History() {
       setRefundError("Invalid password");
       return;
     }
+    if (Object.values(selectedRefundItems).filter(qty => qty > 0).length === 0) {
+      setRefundError("Please select at least one item to refund");
+      return;
+    }
     if (!refundReason.trim()) {
       setRefundError("Reason is required");
       return;
@@ -143,24 +149,96 @@ function History() {
     
     setIsRefunding(true);
     try {
-      const { error } = await supabase
+       const isPartial = transactionToRefund.items.some(item => 
+        (selectedRefundItems[item.item_id] || 0) < item.qty
+      );
+      const refundedItems = transactionToRefund.items.filter(item => (selectedRefundItems[item.item_id] || 0) > 0);
+      const refundedItemsNames = refundedItems.map(item => `${selectedRefundItems[item.item_id]}x ${item.menu_name}`).join(', ');
+        
+      const finalNotes = isPartial 
+        ? `Refunded items: ${refundedItemsNames} | Reason: ${refundReason}` 
+        : refundReason;
+
+        const newStatus = isPartial ? 'COMPLETED' : 'REFUND';
+
+      const originalSubtotal = Number(transactionToRefund.subtotal || 0);
+      const originalTax = Number(transactionToRefund.tax || 0);
+      const originalDiscount = Number(transactionToRefund.discount || 0);
+      
+      const refundedSubtotal = refundedItems.reduce((sum, item) => {
+      const refundQty = selectedRefundItems[item.item_id] || 0;
+      const itemPrice = Number(item.subtotal || 0) / Number(item.qty);
+      return sum + (itemPrice * refundQty);
+      }, 0);     
+
+      let newSubtotal = originalSubtotal - refundedSubtotal;
+      if (newSubtotal < 0) newSubtotal = 0;
+      
+      const ratio = originalSubtotal > 0 ? newSubtotal / originalSubtotal : 0;
+      const newTax = Math.round(originalTax * ratio);
+      const newDiscount = Math.round(originalDiscount * ratio);
+      const newTotal = newSubtotal - newDiscount + newTax;
+
+      // Update the transaction
+      const { error: txError } = await supabase
         .from('transactions')
         .update({ 
-          status: refundType.toUpperCase(),
-          notes: refundReason
+          status: newStatus,
+          notes: finalNotes,
+          subtotal: newSubtotal,
+          tax: newTax,
+          discount: newDiscount,
+          total_price: newTotal
         })
         .eq('transaction_id', transactionToRefund.transaction_id);
         
-      if (error) throw error;
+      if (txError) throw txError;
       
-      setTransactions(prev => prev.map(t => 
-        t.transaction_id === transactionToRefund.transaction_id 
-          ? { ...t, status: refundType.toUpperCase(), notes: refundReason } 
-          : t
-      ));
+      // Delete or update the refunded items
+      for (const item of transactionToRefund.items) {
+        const refundQty = selectedRefundItems[item.item_id] || 0;
+        if (refundQty > 0) {
+          if (refundQty === item.qty) {
+            await supabase.from('transaction_items').delete().eq('item_id', item.item_id);
+          } else {
+            const newQty = item.qty - refundQty;
+            const itemPrice = Number(item.subtotal || 0) / Number(item.qty);
+            const newSub = newQty * itemPrice;
+            await supabase.from('transaction_items').update({ qty: newQty, subtotal: newSub }).eq('item_id', item.item_id);
+          }
+        }
+      };
+      
+      setTransactions(prev => prev.map(t => {
+        if (t.transaction_id === transactionToRefund.transaction_id) {
+            const remainingItems = t.items.map(item => {
+            const refundQty = selectedRefundItems[item.item_id] || 0;
+            if (refundQty === item.qty) return null;
+            if (refundQty > 0) {
+              const newQty = item.qty - refundQty;
+              const itemPrice = Number(item.subtotal || 0) / Number(item.qty);
+              return { ...item, qty: newQty, subtotal: newQty * itemPrice };
+            }
+            return item;
+          }).filter(Boolean);
+                    return { 
+
+            ...t, 
+            status: newStatus, 
+            notes: finalNotes,
+            subtotal: newSubtotal,
+            tax: newTax,
+            discount: newDiscount,
+            total_price: newTotal,
+            items: remainingItems
+          };
+        }
+        return t;
+      }));
       
       setRefundModalOpen(false);
       setTransactionToRefund(null);
+      setSelectedRefundItems({});
     } catch (err) {
       console.error("Error refunding/voiding transaction:", err);
       setRefundError(err.message || "Failed to process request.");
@@ -332,7 +410,7 @@ function History() {
                           <button
                             onClick={(e) => initiateRefund(t, e)}
                             className="p-2 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:bg-orange-900/30 rounded-lg transition-colors inline-flex items-center"
-                            title="Refund / Void"
+                            title="Refund"
                           >
                             <RefreshCcw size={20} />
                           </button>
@@ -358,7 +436,8 @@ function History() {
                               <strong>Reason:</strong> {t.notes}
                             </div>
                           )}
-                        </div>                        <div className="space-y-3">
+                        </div>
+                        <div className="space-y-3">
                           {t.items.map((item, idx) => <div key={idx} className="flex justify-between items-start">
                               <div>
                                 <p className="font-medium text-gray-800 dark:text-gray-100">
@@ -484,30 +563,60 @@ function History() {
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div className="p-4 border-b flex justify-between items-center bg-gray-50 dark:bg-gray-900">
-              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100">Refund / Void Transaction</h3>
+              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100">Refund Transaction</h3>
               <button onClick={() => setRefundModalOpen(false)} className="p-2 hover:bg-gray-200 dark:bg-gray-600 rounded-full text-gray-500 dark:text-gray-400 transition-colors">
                 <X size={20} />
               </button>
             </div>
             <div className="p-6">
               <p className="text-gray-600 dark:text-gray-300 mb-4">
-                Process Refund/Void for transaction <strong>#{transactionToRefund.invoice_no}</strong>.
+                Process Refund for transaction <strong>#{transactionToRefund.invoice_no}</strong>.
               </p>
               
               {refundError && <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm">{refundError}</div>}
               
               <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Type</label>
-                  <select
-                    value={refundType}
-                    onChange={(e) => setRefundType(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-orange-500 outline-none transition-all"
-                  >
-                    <option value="Refund">Refund</option>
-                    <option value="Void">Void</option>
-                  </select>
-                </div>
+                {transactionToRefund.items && transactionToRefund.items.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Select Items to Refund</label>
+                    <div className="max-h-40 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 p-2 space-y-2">
+                      {transactionToRefund.items.map(item => (
+                        <div key={item.item_id} className="flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-gray-600 rounded-lg border border-transparent dark:border-gray-700">
+                          <div className="flex flex-col flex-1">
+                            <span className="text-sm text-gray-800 dark:text-gray-200">
+                              {item.menu_name}
+                            </span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              Rp {(Number(item.subtotal || 0) / Number(item.qty)).toLocaleString('id-ID')} / item (Max {item.qty})
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center space-x-3 ml-2 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
+                            <button
+                              onClick={() => {
+                                setSelectedRefundItems(prev => {
+                                  const current = prev[item.item_id] || 0;
+                                  return { ...prev, [item.item_id]: Math.max(0, current - 1) };
+                                });
+                              }}
+                              className="w-6 h-6 flex items-center justify-center rounded bg-white dark:bg-gray-700 shadow text-gray-600 dark:text-gray-300"
+                            >-</button>
+                            <span className="w-4 text-center text-sm font-bold">{selectedRefundItems[item.item_id] || 0}</span>
+                            <button
+                              onClick={() => {
+                                setSelectedRefundItems(prev => {
+                                  const current = prev[item.item_id] || 0;
+                                  return { ...prev, [item.item_id]: Math.min(item.qty, current + 1) };
+                                });
+                              }}
+                              className="w-6 h-6 flex items-center justify-center rounded bg-white dark:bg-gray-700 shadow text-gray-600 dark:text-gray-300"
+                            >+</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Reason</label>

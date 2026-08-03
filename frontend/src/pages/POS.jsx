@@ -898,25 +898,23 @@ function POS() {
     return <div
       key={item.menu_id}
       onClick={() => !outOfStock && handleMenuClick(item)}
-      className={`bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col ${outOfStock ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md transition-shadow"}`}
-    >
-                <div className="h-40 bg-blue-50 dark:bg-blue-900/30 relative flex items-center justify-center">
-                  <span className="text-blue-500 dark:text-blue-400 font-bold text-6xl opacity-30 select-none">
-                    {item.name ? item.name.charAt(0).toUpperCase() : '?'}
-                  </span>
-                  <div className="absolute top-2 right-2 bg-white dark:bg-gray-800/90 px-2 py-1 rounded-lg text-xs font-bold text-gray-800 dark:text-gray-100">
-                    {item.category}
+className={`bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-32 ${outOfStock ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md transition-shadow"}`}    >
+                 <div className="p-4 flex-1 flex flex-col justify-between relative">
+                  <div>
+                    <div className="flex justify-between items-start mb-2 gap-2">
+                      <h3 className="font-semibold text-gray-800 dark:text-gray-100 leading-tight">{item.name}</h3>
+                      <span className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-[10px] font-bold text-gray-600 dark:text-gray-300 whitespace-nowrap">{item.category}</span>
                   </div>
-                  {outOfStock && <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                      <span className="text-white font-bold px-3 py-1 bg-red-500 rounded-full text-sm">Out of Stock</span>
-                    </div>}
-                </div>
-                <div className="p-4 flex-1 flex flex-col justify-between">
-                  <h3 className="font-semibold text-gray-800 dark:text-gray-100 leading-tight mb-2">{item.name}</h3>
                   <p className="text-blue-600 dark:text-blue-400 font-bold">Rp {Number(item.price || 0).toLocaleString("id-ID")}</p>
+                  </div>
+                  {outOfStock && (
+                    <div className="mt-3">
+                      <span className="text-white font-bold px-2 py-1 bg-red-500 rounded text-xs">Out of Stock</span>
+                    </div>
+                  )}
                 </div>
               </div>;
-  })}
+            })}
           </div>
         </div>
       </div>
