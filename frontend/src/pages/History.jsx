@@ -153,11 +153,22 @@ function History() {
         (selectedRefundItems[item.item_id] || 0) < item.qty
       );
       const refundedItems = transactionToRefund.items.filter(item => (selectedRefundItems[item.item_id] || 0) > 0);
-      const refundedItemsNames = refundedItems.map(item => `${selectedRefundItems[item.item_id]}x ${item.menu_name}`).join(', ');
-        
-      const finalNotes = isPartial 
-        ? `Refunded items: ${refundedItemsNames} | Reason: ${refundReason}` 
-        : refundReason;
+      
+      const refundedItemsList = refundedItems.map(item => {
+        const rQty = selectedRefundItems[item.item_id] || 0;
+        const price = Number(item.subtotal || 0) / Number(item.qty);
+        return {
+          menu_name: item.menu_name,
+          qty: rQty,
+          subtotal: rQty * price
+        };
+      });
+
+      const finalNotes = JSON.stringify({
+        reason: refundReason,
+        refundedItems: refundedItemsList,
+        isPartial: isPartial
+      });
 
         const newStatus = isPartial ? 'COMPLETED' : 'REFUND';
 
@@ -392,6 +403,20 @@ function History() {
                         {t.status}
                       </span>
                     )}
+                    {t.status === 'COMPLETED' && (() => {
+                      let parsedNotes = null;
+                      if (t.notes && t.notes.startsWith('{')) {
+                        try { parsedNotes = JSON.parse(t.notes); } catch(e) {}
+                      }
+                      if (parsedNotes && parsedNotes.isPartial) {
+                        return (
+                          <span className="mt-2 px-2 py-1 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 rounded text-xs font-bold block w-fit">
+                            PARTIAL REFUND
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                   </td>
                   <td className="p-4 text-right">
                     <div className="flex justify-end space-x-2">
@@ -426,19 +451,31 @@ function History() {
                     </div>
                   </td>
                 </tr>
-                {expandedId === t.transaction_id && <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-100">
+                {expandedId === t.transaction_id && (() => {
+                  let parsedNotes = null;
+                  if (t.notes) {
+                    try {
+                      if (t.notes.startsWith('{')) parsedNotes = JSON.parse(t.notes);
+                    } catch(e) {}
+                  }
+                  const isJSONNotes = typeof parsedNotes === 'object' && parsedNotes !== null;
+                  const displayReason = isJSONNotes ? parsedNotes.reason : t.notes;
+
+                  return (
+                    <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800">
                     <td colSpan={8} className="p-6">
                       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
                         <div className="flex justify-between items-center mb-4 border-b pb-2 border-gray-200 dark:border-gray-700">
                           <h4 className="font-semibold text-gray-800 dark:text-gray-100">Order Details</h4>
-                          {t.status && (t.status === 'REFUND' || t.status === 'VOID') && t.notes && (
-                            <div className="text-sm px-3 py-1 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg">
-                              <strong>Reason:</strong> {t.notes}
+                          {displayReason && (
+                              <div className="text-sm px-3 py-1 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg max-w-sm text-right">
+                                <strong>{isJSONNotes && parsedNotes.isPartial ? 'Partial Refund Reason' : 'Refund/Void Reason'}:</strong> {displayReason}
                             </div>
                           )}
                         </div>
                         <div className="space-y-3">
-                          {t.items.map((item, idx) => <div key={idx} className="flex justify-between items-start">
+                          {t.items.map((item, idx) => (
+                              <div key={idx} className="flex justify-between items-start">
                               <div>
                                 <p className="font-medium text-gray-800 dark:text-gray-100">
                                   {item.qty}x {item.menu_name}
@@ -454,9 +491,25 @@ function History() {
                                   </p>}
                               </div>
                               <p className="font-medium text-gray-800 dark:text-gray-100">Rp {Number(item.subtotal || 0).toLocaleString("id-ID")}</p>
-                            </div>)}
-                        </div>
-                        <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end space-x-8 text-sm">
+                            </div>
+                            ))}
+                          </div>
+
+                          {isJSONNotes && parsedNotes.refundedItems && parsedNotes.refundedItems.length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
+                              <h5 className="font-semibold text-red-600 dark:text-red-400 mb-2 text-sm uppercase tracking-wide">Refunded Items</h5>
+                              <div className="space-y-2">
+                                {parsedNotes.refundedItems.map((rItem, idx) => (
+                                  <div key={`refund-${idx}`} className="flex justify-between items-start text-sm text-red-500 opacity-80">
+                                    <p className="line-through">{rItem.qty}x {rItem.menu_name}</p>
+                                    <p className="line-through">Rp {Number(rItem.subtotal || 0).toLocaleString("id-ID")}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 flex justify-end space-x-8 text-sm">
                           <div className="text-right">
                             <p className="text-gray-500 dark:text-gray-400 mb-1">Subtotal</p>
                             <p className="font-medium text-gray-800 dark:text-gray-100">Rp {Number(t.subtotal || 0).toLocaleString("id-ID")}</p>
@@ -476,7 +529,9 @@ function History() {
                         </div>
                       </div>
                     </td>
-                  </tr>}
+                    </tr>
+                  );
+                })()}
               </React.Fragment>)}
             {paginatedTransactions.length === 0 && <tr>
                 <td colSpan={7} className="p-8 text-center text-gray-500 dark:text-gray-400">
