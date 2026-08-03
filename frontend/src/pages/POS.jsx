@@ -898,14 +898,15 @@ function POS() {
     return <div
       key={item.menu_id}
       onClick={() => !outOfStock && handleMenuClick(item)}
-className={`bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-32 ${outOfStock ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md transition-shadow"}`}    >
+      className={`bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-32 ${outOfStock ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md transition-shadow"}`}
+      >
                  <div className="p-4 flex-1 flex flex-col justify-between relative">
                   <div>
                     <div className="flex justify-between items-start mb-2 gap-2">
                       <h3 className="font-semibold text-gray-800 dark:text-gray-100 leading-tight">{item.name}</h3>
                       <span className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-[10px] font-bold text-gray-600 dark:text-gray-300 whitespace-nowrap">{item.category}</span>
-                  </div>
-                  <p className="text-blue-600 dark:text-blue-400 font-bold">Rp {Number(item.price || 0).toLocaleString("id-ID")}</p>
+                    </div>
+                    <p className="text-blue-600 dark:text-blue-400 font-bold">Rp {Number(item.price || 0).toLocaleString("id-ID")}</p>
                   </div>
                   {outOfStock && (
                     <div className="mt-3">
