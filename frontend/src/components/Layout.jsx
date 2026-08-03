@@ -11,10 +11,13 @@ import {
   Users, 
   Settings as SettingsIcon,
   CreditCard,
-  LogOut
+  LogOut,
+  ChevronLeft,
+  Menu as MenuIcon
 } from "lucide-react";
 
 function Layout() {
+  const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
   const location = useLocation();
   const navigate = useNavigate();
   const userStr = localStorage.getItem("user");
@@ -66,37 +69,32 @@ function Layout() {
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
       {/* Sidebar */}
-      <div className="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-colors">
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <img
-              src="/logobrowser.png"
-              alt="Qubite POS"
-              className="w-8 h-8 object-contain"
-            />
+      <div className={`${isSidebarOpen ? 'w-64' : 'w-20'} bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-300 relative`}>
+        {/* Toggle Button */}
+        <button
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className="absolute -right-3 top-6 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full p-1.5 text-gray-500 hover:text-blue-600 z-10 hidden sm:block"
+        >
+          {isSidebarOpen ? <ChevronLeft size={16} /> : <MenuIcon size={16} />}
+        </button>
 
-            <div>
-              <h1 className="text-xl font-bold text-blue-600 dark:text-blue-400">
-                Qubite POS
-              </h1>
-
-              {user && (
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Welcome, {user.username}
-                </p>
+        <div className={`p-4 border-b border-gray-200 dark:border-gray-700 flex ${isSidebarOpen ? 'justify-between' : 'justify-center'} items-center`}>
+          {isSidebarOpen && (
+            <div className="hidden sm:block">
+              <h1 className="text-xl font-bold text-blue-600 dark:text-blue-400">QubitePOS</h1>
+              {user && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate max-w-[140px]">{user.username}</p>}
+              </div>
               )}
-            </div>
-          </div>
           <button
             onClick={toggleTheme}
-            className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+            className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex-shrink-0"
             title="Toggle Dark Mode"
           >
             {theme === 'dark' ? <div>☀️</div> : <div>🌙</div>}
           </button>
         </div>
         
-        <nav className="flex-1 overflow-y-auto p-4 space-y-1">
+        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
           {navItems.map((item) => {
             if (item.permission && !permissions.includes(item.permission)) return null;
             
@@ -105,26 +103,28 @@ function Layout() {
               <Link
                 key={item.path}
                 to={item.path}
-                className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-colors ${
+                className={`flex items-center ${isSidebarOpen ? 'space-x-3 px-4' : 'justify-center px-0'} py-3 rounded-xl transition-colors ${
                   isActive 
                     ? "bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-medium" 
                     : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 hover:text-gray-900 dark:hover:text-white"
                 }`}
+                title={!isSidebarOpen ? item.label : undefined}
               >
-                {item.icon}
-                <span>{item.label}</span>
+                <div className="flex-shrink-0">{item.icon}</div>
+                {isSidebarOpen && <span className="truncate">{item.label}</span>}
               </Link>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="p-3 border-t border-gray-200 dark:border-gray-700">
           <button
             onClick={handleLogout}
-            className="flex items-center space-x-3 px-4 py-3 w-full rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+            className={`flex items-center ${isSidebarOpen ? 'space-x-3 px-4' : 'justify-center px-0'} py-3 w-full rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors`}
+            title={!isSidebarOpen ? "Logout" : undefined}
           >
-            <LogOut size={20} />
-            <span>Logout</span>
+            <LogOut size={20} className="flex-shrink-0" />
+            {isSidebarOpen && <span>Logout</span>}
           </button>
         </div>
       </div>

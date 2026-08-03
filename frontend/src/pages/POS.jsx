@@ -977,8 +977,8 @@ function POS() {
     className="w-full p-2 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
   >
                   <option value="">Select Type</option>
-                  <option value="Dine In">Dine In</option>
-                  <option value="Takeaway">Takeaway</option>
+                  <option value="Cafe">Cafe</option>
+                  <option value="Court">Court</option>
                 </select>
               </div>
               <div className="flex-1">

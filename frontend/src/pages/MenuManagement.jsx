@@ -280,7 +280,7 @@ function MenuManagement() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
         {filteredMenu.map((item) => <div key={item.menu_id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col">
             <div className="h-48 bg-blue-50 relative flex items-center justify-center">
               <span className="text-blue-500 font-bold text-6xl opacity-30 select-none">

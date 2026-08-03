@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Search, Printer, Calendar, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Printer, Calendar, ChevronDown, ChevronUp, Trash2, X } from "lucide-react";
 import moment from "moment-timezone";
 import { supabase } from "../lib/supabase";
 import { printViaBluetooth, formatReceiptText } from "../utils/printer";
@@ -15,6 +15,16 @@ function History() {
   const itemsPerPage = 20;
   const [expandedId, setExpandedId] = useState(null);
   const [storeProfile, setStoreProfile] = useState(null);
+  
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState(null);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const userStr = localStorage.getItem("user");
+  const user = userStr ? JSON.parse(userStr) : null;
+  const isAdmin = user?.role === "ADMIN";
 
   useEffect(() => {
     fetchHistory();
@@ -94,6 +104,41 @@ function History() {
       alert("Bluetooth print failed or was cancelled.");
     }
   };
+  
+  const initiateDelete = (transaction, e) => {
+    e.stopPropagation();
+    setTransactionToDelete(transaction);
+    setDeletePassword("");
+    setDeleteError("");
+    setDeleteModalOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!user || user.password !== deletePassword) {
+      setDeleteError("Invalid password");
+      return;
+    }
+    
+    setIsDeleting(true);
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('transaction_id', transactionToDelete.transaction_id);
+        
+      if (error) throw error;
+      
+      setTransactions(prev => prev.filter(t => t.transaction_id !== transactionToDelete.transaction_id));
+      setDeleteModalOpen(false);
+      setTransactionToDelete(null);
+    } catch (err) {
+      console.error("Error deleting transaction:", err);
+      setDeleteError("Failed to delete transaction.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const transactionsWithInvoice = React.useMemo(() => {
     // Group all transactions by local date string
     const groups = {};
@@ -204,6 +249,7 @@ function History() {
                     </span>
                   </td>
                   <td className="p-4 text-right">
+                    <div className="flex justify-end space-x-2">
                     <button
     onClick={(e) => {
       e.stopPropagation();
@@ -214,6 +260,16 @@ function History() {
   >
                       <Printer size={20} />
                     </button>
+                    {isAdmin && (
+                        <button
+                          onClick={(e) => initiateDelete(t, e)}
+                          className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:bg-red-900/30 rounded-lg transition-colors inline-flex items-center"
+                          title="Delete Transaction"
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
                 {expandedId === t.transaction_id && <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-100">
@@ -292,6 +348,55 @@ function History() {
           </div>
         )}
       </div>
+      
+      {deleteModalOpen && transactionToDelete && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-4 border-b flex justify-between items-center bg-gray-50 dark:bg-gray-900">
+              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100">Delete Transaction</h3>
+              <button onClick={() => setDeleteModalOpen(false)} className="p-2 hover:bg-gray-200 dark:bg-gray-600 rounded-full text-gray-500 dark:text-gray-400 transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-gray-600 dark:text-gray-300 mb-4">
+                Are you sure you want to delete transaction <strong>#{transactionToDelete.invoice_no}</strong>? This action cannot be undone.
+              </p>
+              
+              {deleteError && <div className="bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-sm">{deleteError}</div>}
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Please enter your password to confirm</label>
+                  <input
+                    type="password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-red-500 outline-none transition-all"
+                    placeholder="Enter password"
+                  />
+                </div>
+                
+                <div className="flex space-x-3 pt-2">
+                  <button
+                    onClick={() => setDeleteModalOpen(false)}
+                    className="flex-1 py-3 px-4 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmDelete}
+                    disabled={isDeleting || !deletePassword}
+                    className="flex-1 py-3 px-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isDeleting ? "Deleting..." : "Delete"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>;
 }
 export {
