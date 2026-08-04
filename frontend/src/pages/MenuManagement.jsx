@@ -234,7 +234,7 @@ function MenuManagement() {
 
   const handleOnChangeName = (e) => {
     const value = e.target.value;
-    if (value.length <= 25) {
+    if (value.length <= 50) {
       setFormData({ ...formData, name: value });
     }
   };
@@ -287,6 +287,7 @@ function MenuManagement() {
                 {item.category}
               </div>
               <div>
+                <h3 className="font-bold text-gray-800 dark:text-gray-100 text-lg leading-tight mb-1 pr-16">{item.name}</h3>
                 <p className="text-blue-600 font-bold text-xl mb-4">Rp {item.price.toLocaleString("id-ID")}</p>
                 
                 {item.recipes && item.recipes.length > 0 && <div className="mb-4">
