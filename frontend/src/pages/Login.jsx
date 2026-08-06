@@ -6,8 +6,8 @@ import { Eye, EyeOff } from "lucide-react";
 function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
@@ -66,17 +66,27 @@ function Login() {
           </div>}
 
         <form onSubmit={handleLogin} className="space-y-6">
-          
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Username</label>
-            <div className="relative"></div>
             <input
-    type={showPassword ? "text" : "password"}
+    type="text"
     value={username}
     onChange={(e) => setUsername(e.target.value)}
-    className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all pr-12"
+    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
     placeholder="Enter username"
   />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+            <div className="relative">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                placeholder="Enter password"
+              />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
@@ -85,15 +95,6 @@ function Login() {
                 {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
             </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
-            <input
-    type="password"
-    value={password}
-    onChange={(e) => setPassword(e.target.value)}
-    className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-    placeholder="Enter password"
-  />
           </div>
 
           <button
