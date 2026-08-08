@@ -439,13 +439,6 @@ function History() {
                           >
                             <RefreshCcw size={20} />
                           </button>
-                          <button
-                            onClick={(e) => initiateDelete(t, e)}
-                            className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:bg-red-900/30 rounded-lg transition-colors inline-flex items-center"
-                            title="Delete Transaction"
-                          >
-                            <Trash2 size={20} />
-                          </button>
                         </>
                       )}
                     </div>
