@@ -46,19 +46,44 @@ export const formatReceiptText = (storeProfile, transaction, cart, totals) => {
       name = name.replace(/\s*\(Note: .*?\)$/, "");
     }
 
-    if (item.drink_type) name += ` (${item.drink_type})`;
+    
+    let drinkType = item.drink_type || "";
+    let sugarLevel = item.sugar_level || "";
+    
+    const drinkMatch = name.match(/\[(Hot|Ice)\]/);
+    if (drinkMatch) {
+        drinkType = drinkMatch[1] || drinkType;
+        name = name.replace(/\s*\[(?:Hot|Ice)\]/, "");
+    }
+    
+    const sugarMatch = name.match(/\[(.*?) Sugar\]/);
+    if (sugarMatch) {
+        sugarLevel = sugarMatch[1] || sugarLevel;
+        name = name.replace(/\s*\[.*? Sugar\]/, "");
+    }
     
    // Print name in BOLD, handling word wrap if needed, or simple cutoff
     text += '\x1B\x45\x01'; // Bold on
     text += name.substring(0, WIDTH) + "\n";
     text += '\x1B\x45\x00'; // Bold off
     
+    if (drinkType || sugarLevel) {
+      let tempArr = [];
+      if (drinkType) tempArr.push(drinkType);
+      if (sugarLevel) tempArr.push(`${sugarLevel} Sugar`);
+      if (tempArr.length > 0) {
+        text += `   - ${tempArr.join(", ")}`.substring(0, WIDTH) + "\n";
+      }
+    }
+
     if (note) {
-      text += ` * Note: ${note}`.substring(0, WIDTH) + "\n";
+      text += `   * Note: ${note}`.substring(0, WIDTH) + "\n";
     }
 
     if (item.addons && item.addons.length > 0) {
-      text += ` + ${item.addons.map(a => a.name).join(", ")}`.substring(0, WIDTH) + "\n";
+      item.addons.forEach(a => {
+        text += `   + Addon: ${a.name}`.substring(0, WIDTH) + "\n";
+      });
     }
     
     // Qty x Price     Subtotal

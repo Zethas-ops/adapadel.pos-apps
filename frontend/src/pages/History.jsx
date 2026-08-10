@@ -167,7 +167,8 @@ function History() {
       const finalNotes = JSON.stringify({
         reason: refundReason,
         refundedItems: refundedItemsList,
-        isPartial: isPartial
+        isPartial: isPartial,
+        refundedBy: user?.username || user?.name || "Unknown"
       });
 
         const newStatus = isPartial ? 'COMPLETED' : 'REFUND';
@@ -461,8 +462,13 @@ function History() {
                         <div className="flex justify-between items-center mb-4 border-b pb-2 border-gray-200 dark:border-gray-700">
                           <h4 className="font-semibold text-gray-800 dark:text-gray-100">Order Details</h4>
                           {displayReason && (
-                              <div className="text-sm px-3 py-1 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg max-w-sm text-right">
-                                <strong>{isJSONNotes && parsedNotes.isPartial ? 'Partial Refund Reason' : 'Refund/Void Reason'}:</strong> {displayReason}
+                              <div className="text-sm px-3 py-1 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg max-w-sm text-right flex flex-col items-end">
+                                <div><strong>{isJSONNotes && parsedNotes.isPartial ? 'Partial Refund Reason' : 'Refund/Void Reason'}:</strong> {displayReason}</div>
+                                {isJSONNotes && parsedNotes.refundedBy && (
+                                  <div className="text-xs mt-1 opacity-80">
+                                    Refunded by: {parsedNotes.refundedBy}
+                                  </div>
+                                )}
                             </div>
                           )}
                         </div>

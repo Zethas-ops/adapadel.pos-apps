@@ -602,16 +602,22 @@ function POS() {
       if (txError) throw txError;
 
       // 2. Create transaction items
-      const txItems = cart.map(item => ({
+      const txItems = cart.map(item => {
+        let finalName = item.menu_name;
+        if (item.drink_type) finalName += ` [${item.drink_type}]`;
+        if (item.sugar_level) finalName += ` [${item.sugar_level} Sugar]`;
+        if (item.note) finalName += ` (Note: ${item.note})`;
+        return {
         transaction_id: transaction.transaction_id,
         menu_id: item.menu_id,
-        menu_name: item.note ? `${item.menu_name} (Note: ${item.note})` : item.menu_name,
+        menu_name: finalName,
         qty: item.qty,
         price: item.price,
         subtotal: item.subtotal,
         addons: item.addons,
         is_auto_free: item.is_auto_free || false
-      }));
+      };
+    });
 
       const { error: itemsError } = await supabase
         .from('transaction_items')
