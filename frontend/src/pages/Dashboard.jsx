@@ -26,6 +26,8 @@ function Dashboard() {
   const [startDate, setStartDate] = useState(initZonedNow.clone().subtract(6, 'days').format("YYYY-MM-DD"));
   const [endDate, setEndDate] = useState(initZonedNow.format("YYYY-MM-DD"));
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [salesChartCategory, setSalesChartCategory] = useState("All Categories");
+  const [chartCategories, setChartCategories] = useState([]);
   const [itemCategory, setItemCategory] = useState("All");
   const [itemSort, setItemSort] = useState({ key: 'sold', order: 'desc' });
   const [orderType, setOrderType] = useState("");
@@ -45,7 +47,42 @@ function Dashboard() {
     };
     fetchOptions();
   }, []);
+    
   
+  const getTxnCategoryRevenue = (t, cat, menuMap) => {
+    if (cat === "All Categories") return Number(t.total_price || 0);
+    let rev = 0;
+    if (t.transaction_items) {
+      t.transaction_items.forEach(item => {
+        const mId = item.menu_id;
+        const menuInfo = menuMap[mId] || { category: "Unknown" };
+        let itemAddonsTotal = 0;
+        let parsedAddons = [];
+        if (typeof item.addons === 'string') {
+          try { parsedAddons = JSON.parse(item.addons); } catch(e){}
+        } else {
+          parsedAddons = item.addons || [];
+        }
+        if (parsedAddons && Array.isArray(parsedAddons)) {
+          parsedAddons.forEach(addon => {
+            const addonRev = Number(addon.price) * Number(item.qty);
+            itemAddonsTotal += addonRev;
+            if (cat === "Add-Ons") rev += addonRev;
+          });
+        }
+        if (menuInfo.category === cat) {
+          rev += (Number(item.subtotal) - itemAddonsTotal);
+        }
+      });
+      if (Number(t.total_price) === 0) return 0;
+      if (Number(t.discount) > 0 && Number(t.subtotal) > 0) {
+        const ratio = Number(t.discount) / Number(t.subtotal);
+        rev = rev - (rev * ratio);
+      }
+    }
+    return rev;
+  };
+
   const fetchDashboard = async () => {
     try {
       setLoading(true);
@@ -109,22 +146,59 @@ function Dashboard() {
       if (menuErr) throw menuErr;
       
       const menuMap = {};
+      const uniqueCats = new Set();
       (menuData || []).forEach(m => {
         menuMap[m.menu_id] = { name: m.name, category: m.category };
+        if (m.category) uniqueCats.add(m.category);
       });
+      uniqueCats.add("Add-Ons");
+      setChartCategories(Array.from(uniqueCats));
 
 
       // Calculate Metrics
-      const filteredSales = filteredTxns.reduce((sum, t) => sum + Number(t.total_price), 0);
-      const filteredOrders = filteredTxns.length;
-
+      let filteredSales = 0;
+      let filteredOrders = 0;
       let filteredItemsQty = 0;
       let filteredItemsValue = 0;
+
       filteredTxns.forEach(t => {
+        const txRev = getTxnCategoryRevenue(t, salesChartCategory, menuMap);
+        if (txRev > 0 || salesChartCategory === "All Categories") {
+            filteredSales += txRev;
+            filteredOrders += 1;
+        }
+        
         if (t.transaction_items) {
           t.transaction_items.forEach(item => {
-             filteredItemsQty += Number(item.qty);
-             filteredItemsValue += Number(item.subtotal);
+             const mId = item.menu_id;
+             const menuInfo = menuMap[mId] || { category: "Unknown" };
+             let itemAddonsTotal = 0;
+             let parsedAddons = [];
+             if (typeof item.addons === 'string') {
+               try { parsedAddons = JSON.parse(item.addons); } catch(e){}
+             } else {
+               parsedAddons = item.addons || [];
+             }
+             
+             let qtyAdded = 0;
+             let revAdded = 0;
+             if (parsedAddons && Array.isArray(parsedAddons)) {
+               parsedAddons.forEach(addon => {
+                 const addonRev = Number(addon.price) * Number(item.qty);
+                 itemAddonsTotal += addonRev;
+                 if (salesChartCategory === "Add-Ons" || salesChartCategory === "All Categories") {
+                     qtyAdded += Number(item.qty);
+                     revAdded += addonRev;
+                 }
+               });
+             }
+             if (menuInfo.category === salesChartCategory || salesChartCategory === "All Categories") {
+                 qtyAdded += Number(item.qty);
+                 revAdded += (Number(item.subtotal) - itemAddonsTotal);
+             }
+             
+             filteredItemsQty += qtyAdded;
+             filteredItemsValue += revAdded;
           });
         }
       });
@@ -133,10 +207,10 @@ function Dashboard() {
       const weekTxns = metricTxns.filter(t => t.date >= weekStart && t.date <= weekEnd);
       const monthTxnsOnly = metricTxns.filter(t => t.date >= monthStart && t.date <= monthEnd);
 
-      const todaySales = todayTxns.reduce((sum, t) => sum + Number(t.total_price), 0);
-      const weekSales = weekTxns.reduce((sum, t) => sum + Number(t.total_price), 0);
-      const monthSales = monthTxnsOnly.reduce((sum, t) => sum + Number(t.total_price), 0);
-      const todayOrders = todayTxns.length;
+      const todaySales = todayTxns.reduce((sum, t) => sum + getTxnCategoryRevenue(t, salesChartCategory, menuMap), 0);
+      const weekSales = weekTxns.reduce((sum, t) => sum + getTxnCategoryRevenue(t, salesChartCategory, menuMap), 0);
+      const monthSales = monthTxnsOnly.reduce((sum, t) => sum + getTxnCategoryRevenue(t, salesChartCategory, menuMap), 0);
+      const todayOrders = todayTxns.filter(t => getTxnCategoryRevenue(t, salesChartCategory, menuMap) > 0 || salesChartCategory === "All Categories").length;
 
       setMetrics({
         filteredSales,
@@ -155,7 +229,7 @@ function Dashboard() {
         // Convert UTC date to UTC+7 to group by day correctly
         const day = moment.utc(t.date).tz(TIMEZONE).format("MM-DD");
         if (!salesByDay[day]) salesByDay[day] = 0;
-        salesByDay[day] += Number(t.total_price);
+        salesByDay[day] += getTxnCategoryRevenue(t, salesChartCategory, menuMap);
       });
       const salesChart = Object.keys(salesByDay).sort().map(date => ({
         label: date,
@@ -167,8 +241,12 @@ function Dashboard() {
         // Convert UTC date to UTC+7 to group by hour correctly
         const hour = moment.utc(t.date).tz(TIMEZONE).format("HH:00");
         if (!trafficByHour[hour]) trafficByHour[hour] = { orders: 0, revenue: 0 };
-        trafficByHour[hour].orders += 1;
-        trafficByHour[hour].revenue += Number(t.total_price);
+        
+        const txRev = getTxnCategoryRevenue(t, salesChartCategory, menuMap);
+        if (txRev > 0 || salesChartCategory === "All Categories") {
+          trafficByHour[hour].orders += 1;
+          trafficByHour[hour].revenue += txRev;
+        }
       });
       const hourlyTraffic = Object.keys(trafficByHour).sort().map(hour => ({
         label: hour,
@@ -305,7 +383,7 @@ function Dashboard() {
     if (timeRange !== "custom") {
       fetchDashboard();
     }
-    }, [startDate, endDate, paymentMethod, orderType, timeRange]);
+    }, [startDate, endDate, paymentMethod, orderType, timeRange, salesChartCategory]);
   const handleApplyFilter = () => {
     fetchDashboard();
   };
@@ -384,17 +462,45 @@ function Dashboard() {
             }
             
             let finalMenuName = item.menu_name;
-            if (parsedAddons && Array.isArray(parsedAddons) && parsedAddons.length > 0) {
-              const addonsStr = parsedAddons.map(a => a.name).join(', ');
-              finalMenuName += ` + Addons: ${addonsStr}`;
+            // Clean up name if it contains bracketed types
+            if (finalMenuName.includes(" [")) finalMenuName = finalMenuName.split(" [")[0];
+            if (finalMenuName.includes(" (Note:")) finalMenuName = finalMenuName.split(" (Note:")[0];
+            
+            let itemAddonsTotal = 0;
+            const addonsRows = [];
+
+            if (parsedAddons && Array.isArray(parsedAddons)) {
+              parsedAddons.forEach(addon => {
+                const addonRevenue = Number(addon.price) * Number(item.qty);
+                itemAddonsTotal += addonRevenue;
+                
+                addonsRows.push({
+                  invoice_no: t.invoice_no,
+                  date: localDate,
+                  table_no: t.table_no || '',
+                  customer_name: t.customer_name || '',
+                  payment_method: t.payment_method,
+                  discount_used: '',
+                  total_price: '',
+                  category: 'Add-Ons',
+                  menu_name: addon.name,
+                  qty: item.qty,
+                  price: addon.price,
+                  subtotal: addonRevenue
+                });
+              });
             }
             
-            let adjustedSubtotal = Number(item.subtotal);
+            let adjustedSubtotal = Number(item.subtotal) - itemAddonsTotal;
             if (Number(t.total_price) === 0) {
               adjustedSubtotal = 0;
+              addonsRows.forEach(row => row.subtotal = 0);
             } else if (Number(t.discount) > 0 && Number(t.subtotal) > 0) {
               const ratio = Number(t.discount) / Number(t.subtotal);
               adjustedSubtotal = adjustedSubtotal - (adjustedSubtotal * ratio);
+              addonsRows.forEach(row => {
+                row.subtotal = Number(row.subtotal) - (Number(row.subtotal) * ratio);
+              });
             }
             
             const category = menuCategoryMap[item.menu_id] || "Unknown";
@@ -412,6 +518,12 @@ function Dashboard() {
               qty: item.qty,
               price: item.price,
               subtotal: adjustedSubtotal.toFixed(2)
+            });
+
+            // Push addon rows after main item
+            addonsRows.forEach(row => {
+                row.subtotal = row.subtotal.toFixed(2);
+                csvData.push(row);
             });
           });
         } else {
@@ -548,6 +660,17 @@ function Dashboard() {
               </button>}
           </div>
           <div className="flex flex-wrap items-center gap-3 bg-gray-50 p-2 rounded-xl border border-gray-200">
+            <select
+              value={salesChartCategory}
+              onChange={(e) => setSalesChartCategory(e.target.value)}
+              className="bg-transparent text-sm font-medium text-gray-700 outline-none px-2 py-1 cursor-pointer"
+            >
+              <option value="All Categories">All Categories</option>
+              {chartCategories.map((c, i) => <option key={i} value={c}>{c}</option>)}
+            </select>
+            
+            <div className="hidden sm:block w-px h-6 bg-gray-300"></div>
+
             <select
     value={paymentMethod}
     onChange={(e) => setPaymentMethod(e.target.value)}
