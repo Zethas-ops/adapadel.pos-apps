@@ -26,6 +26,8 @@ function Dashboard() {
   const [startDate, setStartDate] = useState(initZonedNow.clone().subtract(6, 'days').format("YYYY-MM-DD"));
   const [endDate, setEndDate] = useState(initZonedNow.format("YYYY-MM-DD"));
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [itemCategory, setItemCategory] = useState("All");
+  const [itemSort, setItemSort] = useState({ key: 'sold', order: 'desc' });
   const [orderType, setOrderType] = useState("");
   const [paymentOptions, setPaymentOptions] = useState([]);
   const userStr = localStorage.getItem("user");
@@ -99,6 +101,18 @@ function Dashboard() {
       
       const { data: metricTxns, error: metricErr } = await metricQuery;
       if (metricErr) throw metricErr;
+      
+      // 3. Fetch Menu for category mapping
+      const { data: menuData, error: menuErr } = await supabase
+        .from('menu')
+        .select('menu_id, name, category');
+      if (menuErr) throw menuErr;
+      
+      const menuMap = {};
+      (menuData || []).forEach(m => {
+        menuMap[m.menu_id] = { name: m.name, category: m.category };
+      });
+
 
       // Calculate Metrics
       const filteredSales = filteredTxns.reduce((sum, t) => sum + Number(t.total_price), 0);
@@ -186,21 +200,55 @@ function Dashboard() {
       filteredTxns.forEach(t => {
         if (t.transaction_items) {
           t.transaction_items.forEach(item => {
-            let name = item.menu_name;
-            if (name.includes(' (Note:')) {
-              name = name.split(' (Note:')[0];
+            // Group by menu_id to ignore notes completely
+            const mId = item.menu_id;
+            const menuInfo = menuMap[mId] || { name: item.menu_name, category: "Unknown" };
+            
+            // Clean up name if it contains bracketed types
+            let cleanName = menuInfo.name;
+            if (cleanName.includes(" [")) cleanName = cleanName.split(" [")[0];
+            if (cleanName.includes(" (Note:")) cleanName = cleanName.split(" (Note:")[0];
+                        
+            let itemAddonsTotal = 0;
+            // Handle addons
+            let parsedAddons = [];
+            if (typeof item.addons === 'string') {
+              try {
+                parsedAddons = JSON.parse(item.addons);
+              } catch (e) {
+                console.error("Error parsing addons:", e);
+              }
+            } else {
+              parsedAddons = item.addons || [];
             }
-            if (!itemSales[name]) itemSales[name] = { sold: 0, revenue: 0 };
-            itemSales[name].sold += Number(item.qty);
-            itemSales[name].revenue += Number(item.subtotal);
+            
+            if (parsedAddons && Array.isArray(parsedAddons)) {
+              parsedAddons.forEach(addon => {
+                const addonId = `addon_${addon.name}`;
+                if (!itemSales[addonId]) {
+                  itemSales[addonId] = { name: addon.name, category: "Add-Ons", sold: 0, revenue: 0 };
+                }
+                const addonRevenue = Number(addon.price) * Number(item.qty);
+                itemSales[addonId].sold += Number(item.qty);
+                itemSales[addonId].revenue += addonRevenue;
+                itemAddonsTotal += addonRevenue;
+              });
+            }
+
+            if (!itemSales[mId]) itemSales[mId] = { name: cleanName, category: menuInfo.category, sold: 0, revenue: 0 };
+            itemSales[mId].sold += Number(item.qty);
+            itemSales[mId].revenue += (Number(item.subtotal) - itemAddonsTotal);
           });
         }
       });
+
       const allSoldItems = Object.keys(itemSales)
-        .map(name => ({
-          name,
-          sold: itemSales[name].sold,
-          revenue: itemSales[name].revenue
+        .map(mId => ({
+          id: mId,
+          name: itemSales[mId].name,
+          category: itemSales[mId].category,
+          sold: itemSales[mId].sold,
+          revenue: itemSales[mId].revenue
         }))
         .sort((a, b) => b.sold - a.sold);
 
@@ -644,21 +692,66 @@ function Dashboard() {
 
       {/* All Sold Items */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-        <h2 className="text-lg font-bold text-gray-800 mb-6">All Sold Items</h2>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+          <h2 className="text-lg font-bold text-gray-800">All Sold Items</h2>
+          <select 
+            value={itemCategory} 
+            onChange={(e) => setItemCategory(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+          >
+            <option value="All">All Categories</option>
+            <option value="Coffee">Coffee</option>
+            <option value="Non Coffee">Non Coffee</option>
+            <option value="Food">Food</option>
+            <option value="Add-Ons">Add-Ons</option>
+          </select>
+        </div>
+        
         {charts.allSoldItems && charts.allSoldItems.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  <th className="p-3 font-bold text-gray-600">Product Name</th>
-                  <th className="p-3 font-bold text-gray-600">Quantity Sold</th>
-                  <th className="p-3 font-bold text-gray-600 text-right">Revenue</th>
+                   <th 
+                    className="p-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => setItemSort({ key: 'name', order: itemSort.key === 'name' && itemSort.order === 'asc' ? 'desc' : 'asc' })}
+                  >
+                    Product Name {itemSort.key === 'name' ? (itemSort.order === 'asc' ? '↑' : '↓') : ''}
+                  </th>
+                  <th 
+                    className="p-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => setItemSort({ key: 'category', order: itemSort.key === 'category' && itemSort.order === 'asc' ? 'desc' : 'asc' })}
+                  >
+                    Category {itemSort.key === 'category' ? (itemSort.order === 'asc' ? '↑' : '↓') : ''}
+                  </th>
+                  <th 
+                    className="p-3 font-bold text-gray-600 cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => setItemSort({ key: 'sold', order: itemSort.key === 'sold' && itemSort.order === 'desc' ? 'asc' : 'desc' })}
+                  >
+                    Quantity Sold {itemSort.key === 'sold' ? (itemSort.order === 'desc' ? '↓' : '↑') : ''}
+                  </th>
+                  <th 
+                    className="p-3 font-bold text-gray-600 text-right cursor-pointer hover:bg-gray-100 select-none"
+                    onClick={() => setItemSort({ key: 'revenue', order: itemSort.key === 'revenue' && itemSort.order === 'desc' ? 'asc' : 'desc' })}
+                  >
+                    Revenue {itemSort.key === 'revenue' ? (itemSort.order === 'desc' ? '↓' : '↑') : ''}
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {charts.allSoldItems.map((item, idx) => (
-                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50:bg-gray-800 transition-colors">
+                {charts.allSoldItems
+                  .filter(item => itemCategory === "All" || item.category === itemCategory)
+                  .sort((a, b) => {
+                    const multiplier = itemSort.order === 'desc' ? -1 : 1;
+                    if (itemSort.key === 'name' || itemSort.key === 'category') {
+                      return a[itemSort.key].localeCompare(b[itemSort.key]) * multiplier;
+                    }
+                    return (a[itemSort.key] > b[itemSort.key] ? 1 : -1) * multiplier;
+                  })
+                  .map((item, idx) => (
+                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                     <td className="p-3 font-medium text-gray-800">{item.name}</td>
+                    <td className="p-3 text-gray-600"><span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs font-medium">{item.category}</span></td>
                     <td className="p-3 text-gray-600">{item.sold} items</td>
                     <td className="p-3 text-gray-900 font-bold text-right">Rp {item.revenue.toLocaleString("id-ID")}</td>
                   </tr>
