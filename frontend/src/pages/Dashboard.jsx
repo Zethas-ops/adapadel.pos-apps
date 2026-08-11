@@ -335,6 +335,12 @@ function Dashboard() {
         return;
       }
 
+      const { data: menuData } = await supabase.from('menu').select('menu_id, category');
+      const menuCategoryMap = {};
+      (menuData || []).forEach(m => {
+        menuCategoryMap[m.menu_id] = m.category;
+      });
+
       // Flatten the data for CSV
       const sortedData = [...data].sort((a,b) => a.transaction_id - b.transaction_id);
       const groups = {};
@@ -355,8 +361,17 @@ function Dashboard() {
       const csvData = [];
       dataWithInvoice.forEach(t => {
         const localDate = moment.utc(t.date).tz(TIMEZONE).format("YYYY-MM-DD HH:mm:ss");
+        
+        let promoName = '';
+        if (t.notes) {
+          try {
+            const parsedNotes = JSON.parse(t.notes);
+            if (parsedNotes && parsedNotes.promo_name) promoName = parsedNotes.promo_name;
+          } catch(e) {}
+        }
+
         if (t.transaction_items && t.transaction_items.length > 0) {
-          t.transaction_items.forEach(item => {
+          t.transaction_items.forEach((item, index) => {
             let parsedAddons = [];
             if (typeof item.addons === 'string') {
               try {
@@ -368,7 +383,21 @@ function Dashboard() {
               parsedAddons = item.addons || [];
             }
             
-            const addonsString = Array.isArray(parsedAddons) ? parsedAddons.map(a => a.name).join(', ') : '';
+            let finalMenuName = item.menu_name;
+            if (parsedAddons && Array.isArray(parsedAddons) && parsedAddons.length > 0) {
+              const addonsStr = parsedAddons.map(a => a.name).join(', ');
+              finalMenuName += ` + Addons: ${addonsStr}`;
+            }
+            
+            let adjustedSubtotal = Number(item.subtotal);
+            if (Number(t.total_price) === 0) {
+              adjustedSubtotal = 0;
+            } else if (Number(t.discount) > 0 && Number(t.subtotal) > 0) {
+              const ratio = Number(t.discount) / Number(t.subtotal);
+              adjustedSubtotal = adjustedSubtotal - (adjustedSubtotal * ratio);
+            }
+            
+            const category = menuCategoryMap[item.menu_id] || "Unknown";
 
             csvData.push({
               invoice_no: t.invoice_no,
@@ -376,12 +405,13 @@ function Dashboard() {
               table_no: t.table_no || '',
               customer_name: t.customer_name || '',
               payment_method: t.payment_method,
-              total_price: t.total_price,
-              menu_name: item.menu_name,
-              addons: addonsString,
+              discount_used: index === 0 ? promoName : '',
+              total_price: index === 0 ? t.total_price : '',
+              category: category,
+              menu_name: finalMenuName,
               qty: item.qty,
               price: item.price,
-              subtotal: item.subtotal
+              subtotal: adjustedSubtotal.toFixed(2)
             });
           });
         } else {
@@ -391,9 +421,10 @@ function Dashboard() {
             table_no: t.table_no || '',
             customer_name: t.customer_name || '',
             payment_method: t.payment_method,
+            discount_used: promoName,
             total_price: t.total_price,
+            category: '',
             menu_name: '',
-            addons: '',
             qty: '',
             price: '',
             subtotal: ''
@@ -416,6 +447,7 @@ function Dashboard() {
       alert("Failed to export CSV");
     }
   };
+  
   const COLORS = ["#00C49F", "#0088FE", "#FFBB28", "#FF8042"];
   const getPeakHour = () => {
     if (!charts.hourlyTraffic || charts.hourlyTraffic.length === 0) return null;

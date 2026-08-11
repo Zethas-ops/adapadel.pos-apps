@@ -581,6 +581,14 @@ function POS() {
       const user = userStr ? JSON.parse(userStr) : null;
       const cashierName = user ? user.username : 'Unknown';
 
+      let initialNotes = null;
+      if (selectedPromoId) {
+        const promo = promos.find(p => p.promo_id.toString() === selectedPromoId);
+        if (promo) {
+          initialNotes = JSON.stringify({ promo_name: promo.title });
+        }
+      }
+
       const { data: transaction, error: txError } = await supabase
         .from('transactions')
         .insert([{
@@ -594,7 +602,8 @@ function POS() {
           change_amount: finalChange,
           total_price: totals.total,
           date: moment().tz(TIMEZONE).toISOString(),
-          cashier_name: cashierName
+          cashier_name: cashierName,
+          notes: initialNotes
         }])
         .select()
         .single();
