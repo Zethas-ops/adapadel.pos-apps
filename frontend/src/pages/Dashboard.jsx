@@ -256,6 +256,9 @@ function Dashboard() {
 
       const pmCount = {};
       filteredTxns.forEach(t => {
+        const txRev = getTxnCategoryRevenue(t, salesChartCategory, menuMap);
+        if (txRev === 0 && salesChartCategory !== "All Categories") return;
+        
         const pm = t.payment_method;
         if (pm && pm.includes(' (Rp ')) {
           const parts = pm.split(', ');
@@ -320,7 +323,7 @@ function Dashboard() {
         }
       });
 
-      const allSoldItems = Object.keys(itemSales)
+      let allSoldItems = Object.keys(itemSales)
         .map(mId => ({
           id: mId,
           name: itemSales[mId].name,
@@ -328,6 +331,7 @@ function Dashboard() {
           sold: itemSales[mId].sold,
           revenue: itemSales[mId].revenue
         }))
+        .filter(item => salesChartCategory === "All Categories" || item.category === salesChartCategory)
         .sort((a, b) => b.sold - a.sold);
 
       const topSelling = allSoldItems.slice(0, 5);
@@ -849,17 +853,6 @@ function Dashboard() {
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
           <h2 className="text-lg font-bold text-gray-800">All Sold Items</h2>
-          <select 
-            value={itemCategory} 
-            onChange={(e) => setItemCategory(e.target.value)}
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-          >
-            <option value="All">All Categories</option>
-            <option value="Coffee">Coffee</option>
-            <option value="Non Coffee">Non Coffee</option>
-            <option value="Food">Food</option>
-            <option value="Add-Ons">Add-Ons</option>
-          </select>
         </div>
         
         {charts.allSoldItems && charts.allSoldItems.length > 0 ? (
@@ -895,7 +888,6 @@ function Dashboard() {
               </thead>
               <tbody>
                 {charts.allSoldItems
-                  .filter(item => itemCategory === "All" || item.category === itemCategory)
                   .sort((a, b) => {
                     const multiplier = itemSort.order === 'desc' ? -1 : 1;
                     if (itemSort.key === 'name' || itemSort.key === 'category') {
