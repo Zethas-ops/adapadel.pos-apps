@@ -144,6 +144,11 @@ export const formatReceiptText = (storeProfile, transaction, cart, totals) => {
 let cachedDevice = null;
 let cachedCharacteristic = null;
 
+export const isBluetoothConnected = () => {
+  return !!(cachedDevice && cachedDevice.gatt && cachedDevice.gatt.connected);
+};
+
+export const getCachedBluetoothDevice = () => cachedDevice;
 export const printViaBluetooth = async (textToPrint) => {
   if (!navigator.bluetooth) {
     throw new Error("Web Bluetooth API is not supported in this browser.");
@@ -230,4 +235,260 @@ export const printViaBluetooth = async (textToPrint) => {
     cachedCharacteristic = null;
     throw error;
   }
+};
+
+
+export const formatSettlementReceiptEscPos = (settlementData) => {
+  const WIDTH = 32;
+  const padRight = (str, len) => (str + " ".repeat(Math.max(0, len))).substring(0, len);
+  const padLeft = (str, len) => (" ".repeat(Math.max(0, len)) + str).slice(-len);
+  const formatCurrency = (num) => "Rp " + Number(num || 0).toLocaleString('id-ID');
+
+  let text = "";
+
+  // Header - Centered
+  text += '\x1B\x61\x01';
+  text += '\x1B\x45\x01'; // Bold
+  text += (settlementData.storeProfile?.store_name || "NAMA KAFE & COFFEE SHOP") + "\n";
+  text += '\x1B\x45\x00'; // Bold off
+  if (settlementData.storeProfile?.address) {
+    text += settlementData.storeProfile.address + "\n";
+  }
+  text += "=".repeat(WIDTH) + "\n";
+
+  text += '\x1B\x45\x01';
+  text += "SETTLEMENT / REKONSILIASI\n";
+  text += `TANGGAL : ${settlementData.formattedDate}\n`;
+  text += '\x1B\x45\x00';
+  text += "-".repeat(WIDTH) + "\n";
+
+  // Section 1: CAFE/COURT by Menu Categories
+  text += '\x1B\x61\x00'; // Left align
+  text += '\x1B\x45\x01';
+  text += (settlementData.categoryHeader || "CAFE & COURT") + "\n";
+  text += '\x1B\x45\x00';
+
+  if (settlementData.categoryGroups && settlementData.categoryGroups.length > 0) {
+    settlementData.categoryGroups.forEach((group, gIdx) => {
+      if (gIdx > 0) {
+        text += "\n";
+      }
+      text += '\x1B\x45\x01';
+      text += `[ ${group.category.toUpperCase()} ]\n`;
+  text += '\x1B\x45\x00';
+  text += padRight("Menu", 16) + padLeft("Qty", 4) + padLeft("Total", 12) + "\n";
+
+      group.items.forEach(item => {
+        let name = item.name || "";
+        const qtyStr = String(item.qty || 0);
+        const priceStr = formatCurrency(item.total);
+        if (name.length > 15) {
+          text += name + "\n";
+          text += padRight("", 16) + padLeft(qtyStr, 4) + padLeft(priceStr, 12) + "\n";
+        } else {
+          text += padRight(name, 16) + padLeft(qtyStr, 4) + padLeft(priceStr, 12) + "\n";
+        }
+      });
+
+      // Subtotal per category
+      text += "-".repeat(WIDTH) + "\n";
+      text += '\x1B\x45\x01';
+      const subCatLabel = `Subtotal ${group.category}`;
+      const subCatQty = String(group.totalQty || 0);
+      const subCatTotal = formatCurrency(group.subtotal || 0);
+      if (subCatLabel.length > 15) {
+        text += subCatLabel + "\n";
+        text += padRight("", 16) + padLeft(subCatQty, 4) + padLeft(subCatTotal, 12) + "\n";
+      } else {
+        text += padRight(subCatLabel, 16) + padLeft(subCatQty, 4) + padLeft(subCatTotal, 12) + "\n";
+      }
+      text += '\x1B\x45\x00';
+    });
+  } else if (settlementData.items && settlementData.items.length > 0) {
+    text += padRight("Menu", 16) + padLeft("Qty", 4) + padLeft("Total", 12) + "\n";
+    settlementData.items.forEach(item => {
+      let name = item.name || "";
+      const qtyStr = String(item.qty || 0);
+      const priceStr = formatCurrency(item.total);
+      if (name.length > 15) {
+        text += name + "\n";
+        text += padRight("", 16) + padLeft(qtyStr, 4) + padLeft(priceStr, 12) + "\n";
+      } else {
+        text += padRight(name, 16) + padLeft(qtyStr, 4) + padLeft(priceStr, 12) + "\n";
+      }
+    });
+  } else {
+    text += padRight("(Tidak ada item)", 16) + padLeft("0", 4) + padLeft(formatCurrency(0), 12) + "\n";
+  }
+
+  text += "=".repeat(WIDTH) + "\n";
+  text += '\x1B\x45\x01';
+  const subLabel = `TOTAL ${settlementData.categoryHeader || 'CAFE & COURT'}`;
+  const subQty = String(settlementData.itemsTotalQty || 0);
+  const subTotal = formatCurrency(settlementData.itemsSubtotal || 0);
+  if (subLabel.length > 15) {
+    text += subLabel + "\n";
+    text += padRight("", 16) + padLeft(subQty, 4) + padLeft(subTotal, 12) + "\n";
+  } else {
+    text += padRight(subLabel, 16) + padLeft(subQty, 4) + padLeft(subTotal, 12) + "\n";
+  }
+  text += '\x1B\x45\x00';
+  text += "\n";
+
+  // Section 2: PROMO
+  text += '\x1B\x45\x01';
+  text += "PROMO\n";
+  text += '\x1B\x45\x00';
+  text += padRight("Promo", 15) + padLeft("Qty", 4) + padLeft("Total Pot", 13) + "\n";
+  
+  if (settlementData.promos && settlementData.promos.length > 0) {
+    settlementData.promos.forEach(p => {
+      let pName = p.name || "";
+      const pQty = String(p.qty || 0);
+      const pDisc = formatCurrency(p.discount || 0);
+      if (pName.length > 14) {
+        text += pName + "\n";
+        text += padRight("", 15) + padLeft(pQty, 4) + padLeft(pDisc, 13) + "\n";
+      } else {
+        text += padRight(pName, 15) + padLeft(pQty, 4) + padLeft(pDisc, 13) + "\n";
+      }
+    });
+  } else {
+    text += padRight("-", 15) + padLeft("0", 4) + padLeft(formatCurrency(0), 13) + "\n";
+  }
+
+  text += "-".repeat(WIDTH) + "\n";
+  text += '\x1B\x45\x01';
+  const totPromoQty = String(settlementData.totalPromoQty || 0);
+  const totPromoDisc = formatCurrency(settlementData.totalPromoDiscount || 0);
+  text += "Total Potongan Promo\n";
+  text += padRight("", 15) + padLeft(totPromoQty, 4) + padLeft(totPromoDisc, 13) + "\n";
+  text += '\x1B\x45\x00';
+  text += "\n";
+
+  // Section 3: PAYMENT METHOD
+  text += '\x1B\x45\x01';
+  text += "PAYMENT METHOD\n";
+  text += '\x1B\x45\x00';
+  text += padRight("Metode Pembayaran", 15) + padLeft("Qty", 4) + padLeft("Total", 13) + "\n";
+  
+  if (settlementData.paymentMethods && settlementData.paymentMethods.length > 0) {
+    settlementData.paymentMethods.forEach(pm => {
+      let pmName = pm.name || "";
+      const pmQty = String(pm.qty || 0);
+      const pmTot = formatCurrency(pm.total || 0);
+      if (pmName.length > 14) {
+        text += pmName + "\n";
+        text += padRight("", 15) + padLeft(pmQty, 4) + padLeft(pmTot, 13) + "\n";
+      } else {
+        text += padRight(pmName, 15) + padLeft(pmQty, 4) + padLeft(pmTot, 13) + "\n";
+      }
+    });
+  } else {
+    text += padRight("-", 15) + padLeft("0", 4) + padLeft(formatCurrency(0), 13) + "\n";
+  }
+
+  text += "-".repeat(WIDTH) + "\n";
+  text += '\x1B\x45\x01';
+  const totPayQty = String(settlementData.totalPaymentsQty || 0);
+  const totPayAmt = formatCurrency(settlementData.totalPaymentsAmount || 0);
+  text += padRight("Total Pembayaran", 15) + padLeft(totPayQty, 4) + padLeft(totPayAmt, 13) + "\n";
+  text += '\x1B\x45\x00';
+  text += "\n";
+
+  // Section 4: TOTAL KESELURUHAN
+  text += '\x1B\x45\x01';
+  text += "TOTAL KESELURUHAN\n";
+  text += '\x1B\x45\x00';
+  const txTot = formatCurrency(settlementData.totalTransactions || 0);
+  const discTot = formatCurrency(settlementData.totalDiscount || 0);
+  const grandTot = formatCurrency(settlementData.grandTotal || 0);
+
+  text += padRight("Total Transaksi", 17) + ": " + padLeft(txTot, 13) + "\n";
+  text += padRight("Total Discount", 17) + ": " + padLeft(discTot, 13) + "\n";
+  text += "-".repeat(WIDTH) + "\n";
+  text += '\x1B\x45\x01';
+  text += padRight("Grand Total", 17) + ": " + padLeft(grandTot, 13) + "\n";
+  text += '\x1B\x45\x00';
+  text += "-".repeat(WIDTH) + "\n";
+
+  // Footer
+  text += '\x1B\x61\x01';
+  text += '\x1B\x45\x01';
+  text += "STATUS: BERHASIL / SETTLED\n";
+  text += "TERIMA KASIH\n";
+  text += '\x1B\x45\x00';
+  text += "=".repeat(WIDTH) + "\n";
+
+  return text;
+};
+
+export const printThermalReceiptIframe = (receiptHtml) => {
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Settlement / Rekonsiliasi</title>
+        <style>
+          @page { size: auto; margin: 4mm; }
+          body {
+            margin: 0;
+            padding: 4mm;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 11px;
+            color: #000;
+            background: #fff;
+            width: 72mm;
+            max-width: 80mm;
+          }
+          * { box-sizing: border-box; }
+          .center { text-align: center; }
+          .right { text-align: right; }
+          .left { text-align: left; }
+          .bold { font-weight: bold; }
+          .divider-double { border-top: 1.5px dashed #000; margin: 6px 0; }
+          .divider-single { border-top: 1px dashed #000; margin: 6px 0; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          th, td { padding: 2px 0; vertical-align: top; }
+          .nowrap { white-space: nowrap; }
+          .border-b { border-bottom: 1px solid #e5e7eb; }
+          .border-dashed { border-style: dashed !important; }
+          .border-dotted { border-style: dotted !important; }
+          .border-t { border-top: 1px solid #e5e7eb; }
+          .border-t-2 { border-top: 2px solid #000; }
+          .border-gray-900 { border-color: #000 !important; }
+          .border-gray-400 { border-color: #666 !important; }
+          .border-gray-300 { border-color: #999 !important; }
+          .flex { display: flex; }
+          .justify-between { justify-content: space-between; }
+          .uppercase { text-transform: uppercase; }
+        </style>
+      </head>
+      <body>
+        ${receiptHtml}
+      </body>
+    </html>
+  `);
+  doc.close();
+
+  iframe.contentWindow.focus();
+  setTimeout(() => {
+    iframe.contentWindow.print();
+    setTimeout(() => {
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
+    }, 1000);
+  }, 250);
 };

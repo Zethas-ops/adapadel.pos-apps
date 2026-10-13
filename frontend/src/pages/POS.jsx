@@ -938,7 +938,7 @@ function POS() {
       {
     /* Right Side - Cart */
   }
-      <div className="w-120 bg-white dark:bg-gray-800 flex flex-col h-full shadow-xl z-10">
+      <div className="w-96 bg-white dark:bg-gray-800 flex flex-col h-full shadow-xl z-10">
         <div className="p-7.5 border-b bg-gray-50 dark:bg-gray-900 flex justify-between items-center">
           <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Current Order</h2>
           <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-bold">

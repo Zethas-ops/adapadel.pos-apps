@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
-import { DollarSign, Calendar, Download, Clock, TrendingUp, ShoppingBag, Package } from "lucide-react";
+import { DollarSign, Calendar, Download, Clock, TrendingUp, ShoppingBag, Package, Printer } from "lucide-react";
+import SettlementModal from "../components/SettlementModal";
 import moment from "moment-timezone";
 import { supabase } from "../lib/supabase";
 
@@ -31,6 +32,8 @@ function Dashboard() {
   const [itemCategory, setItemCategory] = useState("All");
   const [itemSort, setItemSort] = useState({ key: 'sold', order: 'desc' });
   const [orderType, setOrderType] = useState("");
+  const [showSettlementModal, setShowSettlementModal] = useState(false);
+  const [storeProfile, setStoreProfile] = useState(null);
   const [paymentOptions, setPaymentOptions] = useState([]);
   const userStr = localStorage.getItem("user");
   const user = userStr ? JSON.parse(userStr) : null;
@@ -46,6 +49,10 @@ function Dashboard() {
       }
     };
     fetchOptions();
+        
+    supabase.from('store_profile').select('*').single().then(({ data }) => {
+      if (data) setStoreProfile(data);
+    });
   }, []);
     
   
@@ -575,8 +582,20 @@ function Dashboard() {
   const peakHour = getPeakHour();
   if (loading && !metrics.todaySales) return <div className="p-8 dark:text-gray-300">Loading dashboard...</div>;
   return <div className="p-8 space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen">
-      <div className="flex justify-between items-center">
+    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
         <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
+        <p className="text-sm text-gray-500 mt-0.5">Overview data penjualan & performa operasional</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowSettlementModal(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-xl flex items-center space-x-2 transition-all shadow-md shadow-emerald-200 hover:shadow-lg whitespace-nowrap cursor-pointer"
+          >
+            <Printer size={18} />
+            <span>Print EOD Report</span>
+          </button>
+        </div>
       </div>
 
       {
@@ -651,7 +670,7 @@ function Dashboard() {
   }
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-3">
             <h2 className="text-lg font-bold text-gray-800">
               Sales {timeRangeLabel[timeRange]}
             </h2>
@@ -910,6 +929,12 @@ function Dashboard() {
           <div className="text-center text-gray-500 py-8">No sales data available</div>
         )}
       </div>
+
+      <SettlementModal
+        isOpen={showSettlementModal}
+        onClose={() => setShowSettlementModal(false)}
+        storeProfile={storeProfile}
+      />
 
     </div>;
 }
