@@ -18,6 +18,8 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
   const [hardwareType, setHardwareType] = useState("browser"); // "bluetooth" | "browser"
   const [hardwareName, setHardwareName] = useState("Printer Sistem / Browser");
   const [isPrinting, setIsPrinting] = useState(false);
+  const [paperSize, setPaperSize] = useState("58mm"); // "58mm" | "80mm"
+  const [fontSize, setFontSize] = useState("compact"); // "compact" | "normal" | "large"
   const receiptRef = useRef(null);
 
   const detectHardware = async () => {
@@ -341,7 +343,10 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
     if (hasBluetooth) {
     setBluetoothStatus("Menghubungkan ke printer bluetooth...");
     try {
-      const escPosText = formatSettlementReceiptEscPos(settlementData);
+      const escPosText = formatSettlementReceiptEscPos(settlementData, {
+          paperSize,
+          compactFont: fontSize === "compact"
+        });
       await printViaBluetooth(escPosText);
       setBluetoothStatus("Berhasil dicetak via Bluetooth!");
       detectHardware();
@@ -351,7 +356,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
        // Fallback otomatis ke dialog browser jika bluetooth gagal
         setBluetoothStatus("Bluetooth gagal, mencetak via printer browser...");
         if (receiptRef.current) {
-          printThermalReceiptIframe(receiptRef.current.innerHTML);
+          printThermalReceiptIframe(receiptRef.current.innerHTML, { paperSize, fontSize });
         }
         setTimeout(() => setBluetoothStatus(""), 3000);
       } finally {
@@ -362,7 +367,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
       setBluetoothStatus("Membuka dialog cetak...");
       try {
         if (receiptRef.current) {
-          printThermalReceiptIframe(receiptRef.current.innerHTML);
+          printThermalReceiptIframe(receiptRef.current.innerHTML, { paperSize, fontSize });
         }
       } catch (err) {
         console.error("Browser print failed:", err);
@@ -484,11 +489,40 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="text-sm font-medium text-gray-800 bg-transparent outline-none cursor-pointer"
+                  className="text-xs sm:text-sm font-medium text-gray-800 bg-transparent outline-none cursor-pointer"
                 >
                   <option value="ALL">All (Cafe & Court)</option>
                   <option value="CAFE">Cafe Only</option>
                   <option value="COURT">Court Only</option>
+                </select>
+              </div>
+              
+              {/* Paper Size selector */}
+              <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-xl border border-gray-300 shadow-sm">
+                <span className="text-xs font-semibold text-gray-500">Kertas:</span>
+                <select
+                  value={paperSize}
+                  onChange={(e) => setPaperSize(e.target.value)}
+                  className="text-xs font-medium text-gray-800 bg-transparent outline-none cursor-pointer"
+                  title="Pilih ukuran kertas thermal printer"
+                >
+                  <option value="58mm">58mm (Standar POS)</option>
+                  <option value="80mm">80mm (Lebar)</option>
+                </select>
+              </div>
+
+              {/* Font Size selector */}
+              <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-xl border border-gray-300 shadow-sm">
+                <span className="text-xs font-semibold text-gray-500">Font:</span>
+                <select
+                  value={fontSize}
+                  onChange={(e) => setFontSize(e.target.value)}
+                  className="text-xs font-medium text-gray-800 bg-transparent outline-none cursor-pointer"
+                  title="Sesuaikan ukuran font jika hasil cetak terpotong"
+                >
+                  <option value="compact">Kecil (Compact - Anti Terpotong)</option>
+                  <option value="normal">Sedang (Normal)</option>
+                  <option value="large">Besar (Large)</option>
                 </select>
               </div>
 
@@ -563,19 +597,27 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
               <span>{error}</span>
             </div>
           ) : settlementData ? (
-            /* Thermal Receipt Container (Matches uploaded image exactly) */
+             /* Thermal Receipt Container (Matches uploaded image & prevents thermal cutoffs) */
             <div
               ref={receiptRef}
               id="settlement-receipt-print"
-              className="bg-white text-gray-900 shadow-xl border border-gray-200 p-6 sm:p-8 font-mono text-xs sm:text-[13px] leading-relaxed max-w-[440px] w-full rounded-sm select-text"
+              className={`bg-white text-gray-900 shadow-xl border border-gray-200 p-3.5 sm:p-5 font-mono select-text transition-all ${
+                paperSize === "58mm" ? "max-w-[340px]" : "max-w-[460px]"
+              } ${
+                fontSize === "compact"
+                  ? "text-[11px] leading-snug"
+                  : fontSize === "normal"
+                  ? "text-xs sm:text-[13px] leading-normal"
+                  : "text-sm leading-relaxed"
+              } w-full rounded-sm`}
               style={{ fontFamily: "'Courier New', Courier, monospace" }}
             >
               {/* Header */}
-              <div className="text-center mb-3">
+              <div className="text-center mb-2.5">
                 <div className="font-bold text-sm sm:text-base uppercase tracking-wider text-black">
                   {storeProfile?.store_name || "ADA PADEL & COFFEE SHOP"}
                 </div>
-                <div className="text-xs text-gray-600 mt-1">
+                <div className="text-xs text-gray-600 mt-0.5">
                   {storeProfile?.address || "BSD City, Tangerang"}
                 </div>
                 {storeProfile?.phone && (
@@ -589,11 +631,11 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
               <div className="border-t-2 border-dashed border-gray-900 my-2"></div>
 
               {/* Title & Date */}
-              <div className="text-center my-2">
-                <div className="font-bold tracking-widest text-sm text-black">
+              <div className="text-center my-1.5">
+                <div className="font-bold tracking-widest text-xs sm:text-sm text-black">
                   SETTLEMENT / REKONSILIASI
                 </div>
-                <div className="mt-1 text-xs">
+                <div className="mt-0.5 text-xs text-gray-800">
                   TANGGAL : {settlementData.formattedDate}
                 </div>
               </div>
@@ -603,49 +645,50 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
 
               {/* SECTION 1: MENU / KATEGORI (CAFE / COURT / COFFEE / NON-COFFEE / FOOD, etc.) */}
               <div className="my-2">
-                <div className="font-bold uppercase text-black text-sm mb-2">
+                <div className="font-bold uppercase text-black text-xs sm:text-sm mb-1.5">
                   {settlementData.categoryHeader}
                 </div>
 
                 {settlementData.categoryGroups && settlementData.categoryGroups.length > 0 ? (
                   settlementData.categoryGroups.map((group, gIdx) => (
-                    <div key={gIdx} className={gIdx > 0 ? "mt-3 pt-2.5 border-t border-dashed border-gray-300" : ""}>
+                    <div key={gIdx} className={gIdx > 0 ? "mt-2.5 pt-2 border-t border-dashed border-gray-300" : ""}>
                       {/* Sub-Header Jenis Menu (e.g. [COFFEE], [NON-COFFEE], [FOOD], [COURT]) */}
-                      <div className="font-bold uppercase text-black text-xs sm:text-[13px] mb-1.5 flex items-center justify-between">
-                        <span>[ {group.category} ]</span>
+                      <div className="font-bold uppercase text-black text-[11px] sm:text-xs mb-1">
+                        [ {group.category} ]
                 </div>
                 
-                <table className="w-full text-left border-collapse">
+                <table className="w-full text-left border-collapse" style={{ tableLayout: "fixed" }}>
+                        <colgroup>
+                          <col style={{ width: "48%" }} />
+                          <col style={{ width: "18%" }} />
+                          <col style={{ width: "34%" }} />
+                        </colgroup>
                   <thead>
                     <tr className="border-b border-dashed border-gray-400 text-gray-700">
-                        <th className="py-0.5 font-semibold text-gray-800">Menu</th>
-                        <th className="py-0.5 font-semibold text-center w-12">Qty</th>
-                        <th className="py-0.5 font-semibold text-right w-28">Total Harga</th>
+                        <th className="py-0.5 font-semibold text-gray-800 text-left">Menu</th>
+                        <th className="py-0.5 font-semibold text-center">Qty</th>
+                        <th className="py-0.5 font-semibold text-right">Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {group.items.map((item, idx) => (
-                        <tr key={idx} className="border-b border-gray-100/50">
-                          <td className="py-1 pr-2 align-top text-gray-900">{item.name}</td>
-                          <td className="py-1 text-center align-top text-gray-800">{item.qty}</td>
-                          <td className="py-1 text-right align-top whitespace-nowrap text-gray-900">
+                        <tr key={idx} className="border-b border-gray-100/60">
+                            <td className="py-0.5 pr-1 align-top text-gray-900 break-words">{item.name}</td>
+                            <td className="py-0.5 text-center align-top text-gray-800">{item.qty}</td>
+                            <td className="py-0.5 text-right align-top whitespace-nowrap text-gray-900">
                             {formatCurrency(item.total)}
                           </td>
                         </tr>
                       ))}
                   </tbody>
+                  <tfoot>
+                          <tr className="border-t border-dotted border-gray-400 font-semibold text-gray-800">
+                            <td className="pt-1 text-left break-words">Subtotal {group.category}</td>
+                            <td className="pt-1 text-center">{group.totalQty}</td>
+                            <td className="pt-1 text-right whitespace-nowrap">{formatCurrency(group.subtotal)}</td>
+                          </tr>
+                        </tfoot>
                 </table>
-
-                 {/* Subtotal per Kategori Menu */}
-                      <div className="border-t border-dotted border-gray-400 mt-1 pt-1 flex justify-between font-semibold text-xs text-gray-800">
-                        <span>Subtotal {group.category}</span>
-                        <div className="flex gap-4">
-                          <span className="w-12 text-center">{group.totalQty}</span>
-                          <span className="w-28 text-right whitespace-nowrap">
-                            {formatCurrency(group.subtotal)}
-                          </span>
-                        </div>
-                      </div>
                     </div>
                   ))
                 ) : (
@@ -655,151 +698,158 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
                 )}
 
                 {/* Subtotal / Total Keseluruhan Menu */}
-                <div className="border-t-2 border-dashed border-gray-900 mt-3 pt-2 flex justify-between font-bold text-black">
-                  <span>TOTAL {settlementData.categoryHeader}</span>
-                  <div className="flex gap-4">
-                    <span className="w-12 text-center">{settlementData.itemsTotalQty}</span>
-                    <span className="w-28 text-right whitespace-nowrap">
-                      {formatCurrency(settlementData.itemsSubtotal)}
-                    </span>
-                  </div>
-                </div>
+                <table className="w-full text-left border-collapse mt-2.5" style={{ tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col style={{ width: "48%" }} />
+                    <col style={{ width: "18%" }} />
+                    <col style={{ width: "34%" }} />
+                  </colgroup>
+                  <tfoot>
+                    <tr className="border-t-2 border-dashed border-gray-900 font-bold text-black">
+                      <td className="pt-1.5 text-left break-words">TOTAL {settlementData.categoryHeader}</td>
+                      <td className="pt-1.5 text-center">{settlementData.itemsTotalQty}</td>
+                      <td className="pt-1.5 text-right whitespace-nowrap">{formatCurrency(settlementData.itemsSubtotal)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
               </div>
 
               {/* Single Divider */}
-              <div className="border-t border-dashed border-gray-900 my-3"></div>
+              <div className="border-t border-dashed border-gray-900 my-2.5"></div>
 
               {/* SECTION 2: PROMO */}
               <div className="my-2">
-                <div className="font-bold uppercase text-black text-sm mb-1.5">
+                <div className="font-bold uppercase text-black text-xs sm:text-sm mb-1.5">
                   PROMO
                 </div>
 
-                <table className="w-full text-left border-collapse">
+                <table className="w-full text-left border-collapse" style={{ tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col style={{ width: "48%" }} />
+                    <col style={{ width: "18%" }} />
+                    <col style={{ width: "34%" }} />
+                  </colgroup>
                   <thead>
                     <tr className="border-b border-dashed border-gray-400">
-                      <th className="py-1 font-semibold text-gray-800">Promo</th>
-                      <th className="py-1 font-semibold text-center w-12">Qty</th>
-                      <th className="py-1 font-semibold text-right w-28">Total Potongan</th>
+                      <th className="py-0.5 font-semibold text-gray-800 text-left">Promo</th>
+                      <th className="py-0.5 font-semibold text-center">Qty</th>
+                      <th className="py-0.5 font-semibold text-right">Potongan</th>
                     </tr>
                   </thead>
                   <tbody>
                     {settlementData.promos && settlementData.promos.length > 0 ? (
                       settlementData.promos.map((promo, idx) => (
-                        <tr key={idx} className="border-b border-gray-100/50">
-                          <td className="py-1 pr-2 align-top text-gray-900">{promo.name}</td>
-                          <td className="py-1 text-center align-top text-gray-800">{promo.qty}</td>
-                          <td className="py-1 text-right align-top whitespace-nowrap text-gray-900">
+                        <tr key={idx} className="border-b border-gray-100/60">
+                          <td className="py-0.5 pr-1 align-top text-gray-900 break-words">{promo.name}</td>
+                          <td className="py-0.5 text-center align-top text-gray-800">{promo.qty}</td>
+                          <td className="py-0.5 text-right align-top whitespace-nowrap text-gray-900">
                             {formatCurrency(promo.discount)}
                           </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td className="py-1 text-gray-500">-</td>
-                        <td className="py-1 text-center text-gray-500">0</td>
-                        <td className="py-1 text-right text-gray-500">{formatCurrency(0)}</td>
+                        <td className="py-0.5 text-gray-500">-</td>
+                        <td className="py-0.5 text-center text-gray-500">0</td>
+                        <td className="py-0.5 text-right text-gray-500">{formatCurrency(0)}</td>
                       </tr>
                     )}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t border-dashed border-gray-900 font-bold text-black">
+                      <td className="pt-1.5 text-left break-words">Total Potongan</td>
+                      <td className="pt-1.5 text-center">{settlementData.totalPromoQty}</td>
+                      <td className="pt-1.5 text-right whitespace-nowrap">{formatCurrency(settlementData.totalPromoDiscount)}</td>
+                    </tr>
+                  </tfoot>
                 </table>
-
-                {/* Total Potongan Promo */}
-                <div className="border-t border-dashed border-gray-900 mt-2 pt-2 flex justify-between font-bold text-black">
-                  <span>Total Potongan Promo</span>
-                  <div className="flex gap-4">
-                    <span className="w-12 text-center">{settlementData.totalPromoQty}</span>
-                    <span className="w-28 text-right whitespace-nowrap">
-                      {formatCurrency(settlementData.totalPromoDiscount)}
-                    </span>
-                  </div>
-                </div>
               </div>
 
               {/* Single Divider */}
-              <div className="border-t border-dashed border-gray-900 my-3"></div>
+              <div className="border-t border-dashed border-gray-900 my-2.5"></div>
 
               {/* SECTION 3: PAYMENT METHOD */}
               <div className="my-2">
-                <div className="font-bold uppercase text-black text-sm mb-1.5">
+                <div className="font-bold uppercase text-black text-xs sm:text-sm mb-1.5">
                   PAYMENT METHOD
                 </div>
 
-                <table className="w-full text-left border-collapse">
+                <table className="w-full text-left border-collapse" style={{ tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col style={{ width: "48%" }} />
+                    <col style={{ width: "18%" }} />
+                    <col style={{ width: "34%" }} />
+                  </colgroup>
                   <thead>
                     <tr className="border-b border-dashed border-gray-400">
-                      <th className="py-1 font-semibold text-gray-800">Metode Pembayaran</th>
-                      <th className="py-1 font-semibold text-center w-12">Qty</th>
-                      <th className="py-1 font-semibold text-right w-28">Total</th>
+                      <th className="py-0.5 font-semibold text-gray-800 text-left">Metode Bayar</th>
+                      <th className="py-0.5 font-semibold text-center">Qty</th>
+                      <th className="py-0.5 font-semibold text-right">Total</th>
                     </tr>
                   </thead>
                   <tbody>
                     {settlementData.paymentMethods && settlementData.paymentMethods.length > 0 ? (
                       settlementData.paymentMethods.map((pm, idx) => (
-                        <tr key={idx} className="border-b border-gray-100/50">
-                          <td className="py-1 pr-2 align-top text-gray-900">{pm.name}</td>
-                          <td className="py-1 text-center align-top text-gray-800">{pm.qty}</td>
-                          <td className="py-1 text-right align-top whitespace-nowrap text-gray-900">
+                        <tr key={idx} className="border-b border-gray-100/60">
+                          <td className="py-0.5 pr-1 align-top text-gray-900 break-words">{pm.name}</td>
+                          <td className="py-0.5 text-center align-top text-gray-800">{pm.qty}</td>
+                          <td className="py-0.5 text-right align-top whitespace-nowrap text-gray-900">
                             {formatCurrency(pm.total)}
                           </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td className="py-1 text-gray-500">-</td>
-                        <td className="py-1 text-center text-gray-500">0</td>
-                        <td className="py-1 text-right text-gray-500">{formatCurrency(0)}</td>
+                        <td className="py-0.5 text-gray-500">-</td>
+                        <td className="py-0.5 text-center text-gray-500">0</td>
+                        <td className="py-0.5 text-right text-gray-500">{formatCurrency(0)}</td>
                       </tr>
                     )}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t border-dashed border-gray-900 font-bold text-black">
+                      <td className="pt-1.5 text-left break-words">Total Bayar</td>
+                      <td className="pt-1.5 text-center">{settlementData.totalPaymentsQty}</td>
+                      <td className="pt-1.5 text-right whitespace-nowrap">{formatCurrency(settlementData.totalPaymentsAmount)}</td>
+                    </tr>
+                  </tfoot>
                 </table>
-
-                {/* Total Pembayaran */}
-                <div className="border-t border-dashed border-gray-900 mt-2 pt-2 flex justify-between font-bold text-black">
-                  <span>Total Pembayaran</span>
-                  <div className="flex gap-4">
-                    <span className="w-12 text-center">{settlementData.totalPaymentsQty}</span>
-                    <span className="w-28 text-right whitespace-nowrap">
-                      {formatCurrency(settlementData.totalPaymentsAmount)}
-                    </span>
-                  </div>
-                </div>
               </div>
 
               {/* Single Divider */}
-              <div className="border-t border-dashed border-gray-900 my-3"></div>
+              <div className="border-t border-dashed border-gray-900 my-2.5"></div>
 
               {/* SECTION 4: TOTAL KESELURUHAN */}
-              <div className="my-2 space-y-1.5">
-                <div className="font-bold uppercase text-black text-sm mb-2">
+              <div className="my-2 space-y-1">
+                <div className="font-bold uppercase text-black text-xs sm:text-sm mb-1.5">
                   TOTAL KESELURUHAN
                 </div>
 
                 <div className="flex justify-between py-0.5">
                   <span className="text-gray-800">Total Transaksi</span>
-                  <span className="font-medium">: {formatCurrency(settlementData.totalTransactions)}</span>
+                  <span className="font-medium whitespace-nowrap">{formatCurrency(settlementData.totalTransactions)}</span>
                 </div>
 
                 <div className="flex justify-between py-0.5">
                   <span className="text-gray-800">Total Discount</span>
-                  <span className="font-medium">: {formatCurrency(settlementData.totalDiscount)}</span>
+                  <span className="font-medium whitespace-nowrap">-{formatCurrency(settlementData.totalDiscount)}</span>
                 </div>
 
-                <div className="border-t border-dashed border-gray-900 my-2 pt-2 flex justify-between font-bold text-sm sm:text-base text-black">
+                <div className="border-t border-dashed border-gray-900 my-1.5 pt-1.5 flex justify-between font-bold text-xs sm:text-sm text-black">
                   <span>Grand Total</span>
-                  <span>: {formatCurrency(settlementData.grandTotal)}</span>
+                  <span className="whitespace-nowrap">{formatCurrency(settlementData.grandTotal)}</span>
                 </div>
               </div>
 
               {/* Single Divider */}
-              <div className="border-t border-dashed border-gray-900 my-3"></div>
+              <div className="border-t border-dashed border-gray-900 my-2.5"></div>
 
               {/* Footer */}
-              <div className="text-center my-3 space-y-1">
-                <div className="font-bold uppercase tracking-wider text-black">
+              <div className="text-center my-2 space-y-0.5">
+                <div className="font-bold uppercase tracking-wider text-black text-xs">
                   STATUS: BERHASIL / SETTLED
                 </div>
-                <div className="text-gray-700 tracking-wide">
+                <div className="text-gray-700 tracking-wide text-[11px]">
                   TERIMA KASIH
                 </div>
               </div>
