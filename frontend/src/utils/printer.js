@@ -23,7 +23,7 @@ export const formatReceiptText = (storeProfile, transaction, cart, totals) => {
       txNote = txNoteMatch[1];
       custName = custName.replace(/\s*- Note: [\s\S]*$/, "");
     }
-    } else if (txNote && custName.includes(" - Note: ")) {
+  } else if (txNote && custName.includes(" - Note: ")) {
     // Strip it from custName if explicitly provided but also baked in (from POS.jsx)
     custName = custName.replace(/\s*- Note: [\s\S]*$/, "");
   }
@@ -61,8 +61,8 @@ export const formatReceiptText = (storeProfile, transaction, cart, totals) => {
         sugarLevel = sugarMatch[1] || sugarLevel;
         name = name.replace(/\s*\[.*? Sugar\]/, "");
     }
-    
-   // Print name in BOLD, handling word wrap if needed, or simple cutoff
+
+    // Print name in BOLD, handling word wrap if needed, or simple cutoff
     text += '\x1B\x45\x01'; // Bold on
     text += name.substring(0, WIDTH) + "\n";
     text += '\x1B\x45\x00'; // Bold off
@@ -75,11 +75,10 @@ export const formatReceiptText = (storeProfile, transaction, cart, totals) => {
         text += `   - ${tempArr.join(", ")}`.substring(0, WIDTH) + "\n";
       }
     }
-
+    
     if (note) {
       text += `   * Note: ${note}`.substring(0, WIDTH) + "\n";
     }
-
     if (item.addons && item.addons.length > 0) {
       item.addons.forEach(a => {
         text += `   + Addon: ${a.name}`.substring(0, WIDTH) + "\n";
@@ -149,6 +148,49 @@ export const isBluetoothConnected = () => {
 };
 
 export const getCachedBluetoothDevice = () => cachedDevice;
+
+export const getConnectedPrinterName = () => {
+  if (cachedDevice && cachedDevice.gatt && cachedDevice.gatt.connected) {
+    return cachedDevice.name || "Printer Bluetooth";
+  }
+  return null;
+};
+
+export const connectBluetoothPrinter = async () => {
+  if (!navigator.bluetooth) {
+    throw new Error("Web Bluetooth API tidak didukung pada browser ini.");
+  }
+  const device = await navigator.bluetooth.requestDevice({
+    acceptAllDevices: true,
+    optionalServices: [
+      '000018f0-0000-1000-8000-00805f9b34fb', 
+      'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
+      '49535343-fe7d-4ae5-8fa9-9fafd205e455'
+    ]
+  });
+  if (!device.gatt.connected) {
+    await device.gatt.connect();
+  }
+  const services = await device.gatt.getPrimaryServices();
+  let printCharacteristic = null;
+  for (const service of services) {
+    const characteristics = await service.getCharacteristics();
+    for (const characteristic of characteristics) {
+      if (characteristic.properties.write || characteristic.properties.writeWithoutResponse) {
+        printCharacteristic = characteristic;
+        break;
+      }
+    }
+    if (printCharacteristic) break;
+  }
+  if (!printCharacteristic) {
+    throw new Error("Tidak dapat menemukan characteristic tulis pada printer Bluetooth ini.");
+  }
+  cachedDevice = device;
+  cachedCharacteristic = printCharacteristic;
+  return device;
+};
+
 export const printViaBluetooth = async (textToPrint) => {
   if (!navigator.bluetooth) {
     throw new Error("Web Bluetooth API is not supported in this browser.");
@@ -171,10 +213,10 @@ export const printViaBluetooth = async (textToPrint) => {
       // 2. Try to get already paired / granted devices first for auto-print
       if (!device && navigator.bluetooth.getDevices) {
         try {
-        const devices = await navigator.bluetooth.getDevices();
-        if (devices.length > 0) {
-          device = devices[0];
-        }
+          const devices = await navigator.bluetooth.getDevices();
+          if (devices.length > 0) {
+            device = devices[0];
+          }
         } catch (e) {}
       }
 
@@ -226,14 +268,17 @@ export const printViaBluetooth = async (textToPrint) => {
     );
 
     // Send chunks (BLE MTU is usually around 20-512 bytes)
-    const CHUNK_SIZE = 100;
+    // Use 48 bytes chunk size and a small 20ms pause between chunks to prevent
+    // buffer overflow / 'GATT operation in progress' error on large thermal receipts (like settlements)
+    const CHUNK_SIZE = 48;
     for (let i = 0; i < data.length; i += CHUNK_SIZE) {
       const chunk = data.slice(i, i + CHUNK_SIZE);
       if (cachedCharacteristic.properties.write) {
-         await cachedCharacteristic.writeValue(chunk);
+        await cachedCharacteristic.writeValue(chunk);
       } else {
-         await cachedCharacteristic.writeValueWithoutResponse(chunk);
+        await cachedCharacteristic.writeValueWithoutResponse(chunk);
       }
+      await new Promise(r => setTimeout(r, 20));
     }
 
     return true;
@@ -243,7 +288,7 @@ export const printViaBluetooth = async (textToPrint) => {
     }
     console.error("Bluetooth print error:", error);
     if (!cachedDevice?.gatt?.connected) {
-    cachedCharacteristic = null;
+      cachedCharacteristic = null;
     }
     throw error;
   }
@@ -310,8 +355,8 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
       }
       text += '\x1B\x45\x01';
       text += `[ ${group.category.toUpperCase()} ]\n`;
-  text += '\x1B\x45\x00';
-  text += padRight("Menu", 15) + " " + padLeft("Qty", 3) + " " + padLeft("Total", 12) + "\n";
+      text += '\x1B\x45\x00';
+      text += padRight("Menu", 15) + " " + padLeft("Qty", 3) + " " + padLeft("Total", 12) + "\n";
 
       group.items.forEach(item => {
         let name = item.name || "";
@@ -389,14 +434,14 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
       }
     });
   } else {
-    text += "   " + padRight(pQty + "x", 6) + padLeft(pDisc, WIDTH - 9) + "\n";
+    text += padRight("-", 15) + "   0 " + padLeft(formatCurrency(0), 12) + "\n";
   }
 
   text += "-".repeat(WIDTH) + "\n";
   text += '\x1B\x45\x01';
   const totPromoQty = String(settlementData.totalPromoQty || 0);
   const totPromoDisc = formatCurrency(settlementData.totalPromoDiscount || 0);
-   text += padRight("Tot Potongan", 14) + " " + padLeft(totPromoQty, 3) + " " + padLeft(totPromoDisc, 13) + "\n";
+  text += padRight("Tot Potongan", 14) + " " + padLeft(totPromoQty, 3) + " " + padLeft(totPromoDisc, 13) + "\n";
   text += '\x1B\x45\x00';
   text += "\n";
 
@@ -823,24 +868,44 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
 export const printSettlementReceipt = async (settlementData, options = {}) => {
   const paperSize = options.paperSize || "58mm";
   const compactFont = options.compactFont !== false;
-  const escPosText = formatSettlementReceiptEscPos(settlementData, { paperSize, compactFont });
 
-  // 1. Check if Bluetooth is available / connected, same as POS order receipts
-  if (typeof navigator !== "undefined" && navigator.bluetooth) {
+  let escPosText = "";
+  try {
+    escPosText = formatSettlementReceiptEscPos(settlementData, { paperSize, compactFont });
+  } catch (fmtErr) {
+    console.error("Error formatting settlement ESC/POS:", fmtErr);
+  }
+
+  // 1. If Bluetooth is actively connected, print directly via Bluetooth
+  const hasActiveBt = isBluetoothConnected();
+  if (hasActiveBt && escPosText) {
     try {
       await printViaBluetooth(escPosText);
-      return { success: true, method: "bluetooth" };
+      return { success: true, method: "bluetooth", deviceName: getConnectedPrinterName() };
     } catch (btErr) {
-      console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
-      // Fallback to browser print dialog
+      console.warn("Active Bluetooth print failed, falling back to browser print:", btErr);
       const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
       printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
       return { success: true, method: "browser", fallbackReason: btErr.message };
     }
-  } else {
-    // Bluetooth not supported on this browser/environment, use browser print
-    const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
-    printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
-    return { success: true, method: "browser" };
   }
+
+  // 2. If Bluetooth is supported in browser and we have ESC/POS text
+  if (typeof navigator !== "undefined" && navigator.bluetooth && escPosText) {
+    try {
+      await printViaBluetooth(escPosText);
+      return { success: true, method: "bluetooth", deviceName: getConnectedPrinterName() };
+    } catch (btErr) {
+      console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
+      const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
+      printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
+      return { success: true, method: "browser", fallbackReason: btErr.message };
+    }
+  }
+
+  // 3. Browser Print Dialog Fallback
+  const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
+  printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
+  return { success: true, method: "browser" };
 };
+
