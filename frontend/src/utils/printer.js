@@ -155,18 +155,30 @@ export const printViaBluetooth = async (textToPrint) => {
   }
 
   try {
-    if (!cachedDevice || !cachedDevice.gatt.connected || !cachedCharacteristic) {
-      let device;
+    let device = cachedDevice;
 
-      // Try to get already paired devices first for auto-print
-      if (navigator.bluetooth.getDevices) {
+    // 1. If we already have a cached device (e.g. from POS order receipt), try to reconnect to it!
+    if (device && device.gatt && !device.gatt.connected) {
+      try {
+        await device.gatt.connect();
+      } catch (reconnectErr) {
+        console.warn("Failed to reconnect to cached bluetooth device, searching available devices:", reconnectErr);
+        device = null;
+      }
+    }
+
+    if (!device || !device.gatt || !device.gatt.connected || !cachedCharacteristic) {
+      // 2. Try to get already paired / granted devices first for auto-print
+      if (!device && navigator.bluetooth.getDevices) {
+        try {
         const devices = await navigator.bluetooth.getDevices();
         if (devices.length > 0) {
           device = devices[0];
         }
+        } catch (e) {}
       }
 
-      // If no paired device found, ask user to select one
+      // 3. If no paired device found, ask user to select one
       if (!device) {
         device = await navigator.bluetooth.requestDevice({
           acceptAllDevices: true,
@@ -230,9 +242,9 @@ export const printViaBluetooth = async (textToPrint) => {
         throw new Error("Operation cancelled.");
     }
     console.error("Bluetooth print error:", error);
-    // On error, clear cache
-    cachedDevice = null;
+    if (!cachedDevice?.gatt?.connected) {
     cachedCharacteristic = null;
+    }
     throw error;
   }
 };
@@ -590,4 +602,245 @@ export const printThermalReceiptIframe = (receiptHtml, options = {}) => {
       }
     }, 1000);
   }, 250);
+};
+
+export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
+  const formatCurrency = (num) => "Rp " + Number(num || 0).toLocaleString('id-ID');
+  const store = settlementData.storeProfile || { store_name: "ADA PADEL & COFFEE SHOP", address: "BSD City, Tangerang" };
+
+  let categoriesHtml = "";
+  if (settlementData.categoryGroups && settlementData.categoryGroups.length > 0) {
+    categoriesHtml = settlementData.categoryGroups.map((group, gIdx) => {
+      const itemsRows = group.items.map(item => `
+        <tr class="border-b border-gray-100">
+          <td class="py-0.5 pr-1 align-top text-gray-900 break-words">${item.name}</td>
+          <td class="py-0.5 text-center align-top text-gray-800">${item.qty}</td>
+          <td class="py-0.5 text-right align-top whitespace-nowrap text-gray-900">${formatCurrency(item.total)}</td>
+        </tr>
+      `).join("");
+
+      return `
+        <div class="${gIdx > 0 ? 'mt-2 pt-1.5 border-t border-dashed border-gray-300' : ''}">
+          <div class="font-bold uppercase text-black text-[11px] mb-1">[ ${group.category} ]</div>
+          <table class="w-full text-left border-collapse" style="table-layout: fixed;">
+            <colgroup>
+              <col style="width: 48%;" />
+              <col style="width: 18%;" />
+              <col style="width: 34%;" />
+            </colgroup>
+            <thead>
+              <tr class="border-b border-dashed border-gray-400">
+                <th class="py-0.5 font-semibold text-left">Menu</th>
+                <th class="py-0.5 font-semibold text-center">Qty</th>
+                <th class="py-0.5 font-semibold text-right">Total</th>
+              </tr>
+            </thead>
+            <tbody>${itemsRows}</tbody>
+            <tfoot>
+              <tr class="border-t border-dotted border-gray-400 font-semibold">
+                <td class="pt-1 text-left break-words">Subtotal ${group.category}</td>
+                <td class="pt-1 text-center">${group.totalQty}</td>
+                <td class="pt-1 text-right whitespace-nowrap">${formatCurrency(group.subtotal)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      `;
+    }).join("");
+  } else {
+    categoriesHtml = '<div class="py-2 text-center italic text-gray-500">(Tidak ada item terjual)</div>';
+  }
+
+  let promosHtml = "";
+  if (settlementData.promos && settlementData.promos.length > 0) {
+    promosHtml = settlementData.promos.map(p => `
+      <tr class="border-b border-gray-100">
+        <td class="py-0.5 pr-1 align-top break-words">${p.name}</td>
+        <td class="py-0.5 text-center align-top">${p.qty}</td>
+        <td class="py-0.5 text-right align-top whitespace-nowrap">${formatCurrency(p.discount)}</td>
+      </tr>
+    `).join("");
+  } else {
+    promosHtml = `
+      <tr>
+        <td class="py-0.5 text-gray-500">-</td>
+        <td class="py-0.5 text-center text-gray-500">0</td>
+        <td class="py-0.5 text-right text-gray-500">${formatCurrency(0)}</td>
+      </tr>
+    `;
+  }
+
+  let pmHtml = "";
+  if (settlementData.paymentMethods && settlementData.paymentMethods.length > 0) {
+    pmHtml = settlementData.paymentMethods.map(pm => `
+      <tr class="border-b border-gray-100">
+        <td class="py-0.5 pr-1 align-top break-words">${pm.name}</td>
+        <td class="py-0.5 text-center align-top">${pm.qty}</td>
+        <td class="py-0.5 text-right align-top whitespace-nowrap">${formatCurrency(pm.total)}</td>
+      </tr>
+    `).join("");
+  } else {
+    pmHtml = `
+      <tr>
+        <td class="py-0.5 text-gray-500">-</td>
+        <td class="py-0.5 text-center text-gray-500">0</td>
+        <td class="py-0.5 text-right text-gray-500">${formatCurrency(0)}</td>
+      </tr>
+    `;
+  }
+
+  return `
+    <div style="font-family: 'Courier New', Courier, monospace; width: 100%;">
+      <!-- Header -->
+      <div class="text-center mb-2">
+        <div class="font-bold text-sm uppercase tracking-wider text-black">${store.store_name || "ADA PADEL & COFFEE SHOP"}</div>
+        <div class="text-xs text-gray-600 mt-0.5">${store.address || "BSD City, Tangerang"}</div>
+        ${store.phone ? `<div class="text-xs text-gray-600">Telp: ${store.phone}</div>` : ''}
+      </div>
+
+      <div class="divider-double"></div>
+
+      <!-- Title & Date -->
+      <div class="text-center my-1.5">
+        <div class="font-bold tracking-widest text-xs text-black">SETTLEMENT / REKONSILIASI</div>
+        <div class="mt-0.5 text-xs text-gray-800">TANGGAL : ${settlementData.formattedDate}</div>
+      </div>
+
+      <div class="divider-single"></div>
+
+      <!-- Section 1: Menu by Category -->
+      <div class="my-1.5">
+        <div class="font-bold uppercase text-black text-xs mb-1">${settlementData.categoryHeader || "CAFE & COURT"}</div>
+        ${categoriesHtml}
+
+        <!-- Total Section 1 -->
+        <table class="w-full text-left border-collapse mt-2" style="table-layout: fixed;">
+          <colgroup>
+            <col style="width: 48%;" />
+            <col style="width: 18%;" />
+            <col style="width: 34%;" />
+          </colgroup>
+          <tfoot>
+            <tr class="border-t-2 border-dashed border-gray-900 font-bold text-black">
+              <td class="pt-1 text-left break-words">TOTAL ${settlementData.categoryHeader || "CAFE & COURT"}</td>
+              <td class="pt-1 text-center">${settlementData.itemsTotalQty || 0}</td>
+              <td class="pt-1 text-right whitespace-nowrap">${formatCurrency(settlementData.itemsSubtotal || 0)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="divider-single"></div>
+
+      <!-- Section 2: Promo -->
+      <div class="my-1.5">
+        <div class="font-bold uppercase text-black text-xs mb-1">PROMO</div>
+        <table class="w-full text-left border-collapse" style="table-layout: fixed;">
+          <colgroup>
+            <col style="width: 48%;" />
+            <col style="width: 18%;" />
+            <col style="width: 34%;" />
+          </colgroup>
+          <thead>
+            <tr class="border-b border-dashed border-gray-400">
+              <th class="py-0.5 font-semibold text-left">Promo</th>
+              <th class="py-0.5 font-semibold text-center">Qty</th>
+              <th class="py-0.5 font-semibold text-right">Potongan</th>
+            </tr>
+          </thead>
+          <tbody>${promosHtml}</tbody>
+          <tfoot>
+            <tr class="border-t border-dashed border-gray-900 font-bold text-black">
+              <td class="pt-1 text-left break-words">Total Potongan</td>
+              <td class="pt-1 text-center">${settlementData.totalPromoQty || 0}</td>
+              <td class="pt-1 text-right whitespace-nowrap">${formatCurrency(settlementData.totalPromoDiscount || 0)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="divider-single"></div>
+
+      <!-- Section 3: Payment Method -->
+      <div class="my-1.5">
+        <div class="font-bold uppercase text-black text-xs mb-1">PAYMENT METHOD</div>
+        <table class="w-full text-left border-collapse" style="table-layout: fixed;">
+          <colgroup>
+            <col style="width: 48%;" />
+            <col style="width: 18%;" />
+            <col style="width: 34%;" />
+          </colgroup>
+          <thead>
+            <tr class="border-b border-dashed border-gray-400">
+              <th class="py-0.5 font-semibold text-left">Metode Bayar</th>
+              <th class="py-0.5 font-semibold text-center">Qty</th>
+              <th class="py-0.5 font-semibold text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>${pmHtml}</tbody>
+          <tfoot>
+            <tr class="border-t border-dashed border-gray-900 font-bold text-black">
+              <td class="pt-1 text-left break-words">Total Bayar</td>
+              <td class="pt-1 text-center">${settlementData.totalPaymentsQty || 0}</td>
+              <td class="pt-1 text-right whitespace-nowrap">${formatCurrency(settlementData.totalPaymentsAmount || 0)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="divider-single"></div>
+
+      <!-- Section 4: Total Keseluruhan -->
+      <div class="my-1.5 space-y-1">
+        <div class="font-bold uppercase text-black text-xs mb-1">TOTAL KESELURUHAN</div>
+        <div class="flex justify-between py-0.5">
+          <span>Total Transaksi</span>
+          <span class="font-medium whitespace-nowrap">${formatCurrency(settlementData.totalTransactions || 0)}</span>
+        </div>
+        <div class="flex justify-between py-0.5">
+          <span>Total Discount</span>
+          <span class="font-medium whitespace-nowrap">-${formatCurrency(settlementData.totalDiscount || 0)}</span>
+        </div>
+        <div class="border-t border-dashed border-gray-900 my-1 pt-1 flex justify-between font-bold text-xs text-black">
+          <span>Grand Total</span>
+          <span class="whitespace-nowrap">${formatCurrency(settlementData.grandTotal || 0)}</span>
+        </div>
+      </div>
+
+      <div class="divider-single"></div>
+
+      <!-- Footer -->
+      <div class="text-center my-1.5 space-y-0.5">
+        <div class="font-bold uppercase tracking-wider text-black text-xs">STATUS: BERHASIL / SETTLED</div>
+        <div class="text-gray-700 tracking-wide text-[11px]">TERIMA KASIH</div>
+      </div>
+
+      <div class="divider-double"></div>
+    </div>
+  `;
+};
+
+export const printSettlementReceipt = async (settlementData, options = {}) => {
+  const paperSize = options.paperSize || "58mm";
+  const compactFont = options.compactFont !== false;
+  const escPosText = formatSettlementReceiptEscPos(settlementData, { paperSize, compactFont });
+
+  // 1. Check if Bluetooth is available / connected, same as POS order receipts
+  if (typeof navigator !== "undefined" && navigator.bluetooth) {
+    try {
+      await printViaBluetooth(escPosText);
+      return { success: true, method: "bluetooth" };
+    } catch (btErr) {
+      console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
+      // Fallback to browser print dialog
+      const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
+      printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
+      return { success: true, method: "browser", fallbackReason: btErr.message };
+    }
+  } else {
+    // Bluetooth not supported on this browser/environment, use browser print
+    const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
+    printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
+    return { success: true, method: "browser" };
+  }
 };

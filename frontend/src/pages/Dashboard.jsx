@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
-import { DollarSign, Calendar, Download, Clock, TrendingUp, ShoppingBag, Package, Printer } from "lucide-react";
-import SettlementModal from "../components/SettlementModal";
+import { DollarSign, Calendar, Download, Clock, TrendingUp, ShoppingBag, Package, Printer, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
 import moment from "moment-timezone";
 import { supabase } from "../lib/supabase";
+import { fetchSettlementData } from "../utils/settlement";
+import { printSettlementReceipt } from "../utils/printer";
 
 const TIMEZONE = 'Asia/Jakarta';
 
@@ -32,7 +33,10 @@ function Dashboard() {
   const [itemCategory, setItemCategory] = useState("All");
   const [itemSort, setItemSort] = useState({ key: 'sold', order: 'desc' });
   const [orderType, setOrderType] = useState("");
-  const [showSettlementModal, setShowSettlementModal] = useState(false);
+  const [settlementDate, setSettlementDate] = useState(initZonedNow.format("YYYY-MM-DD"));
+  const [settlementCategory, setSettlementCategory] = useState("ALL");
+  const [isPrintingSettlement, setIsPrintingSettlement] = useState(false);
+  const [settlementStatus, setSettlementStatus] = useState(null);
   const [storeProfile, setStoreProfile] = useState(null);
   const [paymentOptions, setPaymentOptions] = useState([]);
   const userStr = localStorage.getItem("user");
@@ -580,23 +584,133 @@ function Dashboard() {
     );
   };
   const peakHour = getPeakHour();
+  
+  const handleDirectPrintSettlement = async () => {
+    if (isPrintingSettlement) return;
+    setIsPrintingSettlement(true);
+    setSettlementStatus({ type: "info", text: "Mengambil data settlement & mencetak..." });
+
+    try {
+      const settlementData = await fetchSettlementData(supabase, settlementDate, settlementCategory, storeProfile);
+
+      if (!settlementData.items || settlementData.items.length === 0) {
+        setSettlementStatus({
+          type: "info",
+          text: `Tidak ada transaksi selesai pada tanggal ${settlementData.formattedDate} untuk kategori ${settlementData.categoryHeader}. Struk kosong tetap dicetak.`
+        });
+      }
+
+      const printRes = await printSettlementReceipt(settlementData, {
+        paperSize: "58mm",
+        compactFont: true
+      });
+
+      if (printRes.method === "bluetooth") {
+        setSettlementStatus({
+          type: "success",
+          text: `Settlement tanggal ${settlementData.formattedDate} (${settlementData.categoryHeader}) berhasil dicetak via printer Bluetooth!`
+        });
+      } else {
+        setSettlementStatus({
+          type: "success",
+          text: `Settlement tanggal ${settlementData.formattedDate} (${settlementData.categoryHeader}) dibuka di printer browser.`
+        });
+      }
+
+      setTimeout(() => setSettlementStatus(null), 5000);
+    } catch (err) {
+      console.error("Direct settlement print failed:", err);
+      setSettlementStatus({
+        type: "error",
+        text: `Gagal mencetak settlement: ${err.message || "Unknown error"}`
+      });
+      setTimeout(() => setSettlementStatus(null), 6000);
+    } finally {
+      setIsPrintingSettlement(false);
+    }
+  };
+
   if (loading && !metrics.todaySales) return <div className="p-8 dark:text-gray-300">Loading dashboard...</div>;
   return <div className="p-8 space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen">
-    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+    <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div>
         <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
         <p className="text-sm text-gray-500 mt-0.5">Overview data penjualan & performa operasional</p>
         </div>
-        <div className="flex items-center gap-3">
+        
+        {/* Print Settlement Controls (Direct Print - No Popup) */}
+        <div className="flex flex-wrap items-center gap-2.5 bg-white p-2 rounded-2xl border border-gray-200 shadow-sm">
+          {/* Date Picker */}
+          <div className="flex items-center space-x-1.5 px-2.5 py-1.5 bg-gray-50 rounded-xl border border-gray-200">
+            <Calendar size={14} className="text-gray-500" />
+            <span className="text-xs font-semibold text-gray-500">Tgl:</span>
+            <input
+              type="date"
+              value={settlementDate}
+              onChange={(e) => setSettlementDate(e.target.value)}
+              className="text-xs font-medium text-gray-800 bg-transparent outline-none cursor-pointer"
+            />
+          </div>
+
+          {/* Quick Date 'Hari Ini' */}
           <button
-            onClick={() => setShowSettlementModal(true)}
-            className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold py-2.5 px-4 rounded-xl flex items-center space-x-2 transition-all shadow-md shadow-emerald-200 hover:shadow-lg whitespace-nowrap cursor-pointer"
+            type="button"
+            onClick={() => setSettlementDate(moment().tz(TIMEZONE).format("YYYY-MM-DD"))}
+            className={`text-xs px-2.5 py-1.5 rounded-lg font-medium transition-colors border ${
+              settlementDate === moment().tz(TIMEZONE).format("YYYY-MM-DD")
+                ? "bg-emerald-600 text-white border-emerald-600"
+                : "bg-white text-gray-700 border-gray-200 hover:bg-gray-100"
+            }`}
+            title="Pilih tanggal hari ini"
           >
-            <Printer size={18} />
-            <span>Print EOD Report</span>
+            Hari Ini
+          </button>
+          
+          {/* Category Filter */}
+          <div className="flex items-center space-x-1.5 px-2.5 py-1.5 bg-gray-50 rounded-xl border border-gray-200">
+            <span className="text-xs font-semibold text-gray-500">Kategori:</span>
+            <select
+              value={settlementCategory}
+              onChange={(e) => setSettlementCategory(e.target.value)}
+              className="text-xs font-medium text-gray-800 bg-transparent outline-none cursor-pointer"
+            >
+              <option value="ALL">Semua (Cafe & Court)</option>
+              <option value="CAFE">Cafe Saja</option>
+              <option value="COURT">Court Saja</option>
+            </select>
+          </div>
+
+          {/* Direct Print Button (No Popup) */}
+          <button
+            type="button"
+            onClick={handleDirectPrintSettlement}
+            disabled={isPrintingSettlement}
+            className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-semibold py-2 px-4 rounded-xl flex items-center space-x-2 transition-all shadow-sm hover:shadow whitespace-nowrap cursor-pointer text-xs sm:text-sm"
+            title="Langsung cetak settlement ke device printer yang sudah terkoneksi"
+          >
+            <Printer size={16} className={isPrintingSettlement ? "animate-spin" : ""} />
+            <span>{isPrintingSettlement ? "Mencetak..." : "Print Settlement"}</span>
           </button>
         </div>
       </div>
+      
+      {/* Settlement Notification Banner */}
+      {settlementStatus && (
+        <div
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs sm:text-sm shadow-sm transition-all ${
+            settlementStatus.type === "success"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+              : settlementStatus.type === "error"
+              ? "bg-red-50 border-red-200 text-red-800"
+              : "bg-blue-50 border-blue-200 text-blue-800"
+          }`}
+        >
+          {settlementStatus.type === "success" && <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />}
+          {settlementStatus.type === "error" && <AlertCircle size={16} className="text-red-600 shrink-0" />}
+          {settlementStatus.type === "info" && <RefreshCw size={16} className="animate-spin text-blue-600 shrink-0" />}
+          <span className="font-medium">{settlementStatus.text}</span>
+        </div>
+      )}
 
       {
     /* Metrics Cards */
@@ -930,11 +1044,6 @@ function Dashboard() {
         )}
       </div>
 
-      <SettlementModal
-        isOpen={showSettlementModal}
-        onClose={() => setShowSettlementModal(false)}
-        storeProfile={storeProfile}
-      />
 
     </div>;
 }
