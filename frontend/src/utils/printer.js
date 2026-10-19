@@ -311,6 +311,26 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
   };
   const formatCurrency = (num) => "Rp " + Number(num || 0).toLocaleString('id-ID');
 
+  // Strict column layout so Header and Data rows are 100% aligned:
+  // 58mm: colName(15) + 1 space + colQty(3) + 1 space + colPrice(12) = 32 chars
+  // 80mm: colName(21) + 1 space + colQty(4) + 1 space + colPrice(15) = 42 chars
+  const colName = paperSize === '80mm' ? 21 : 15;
+  const colQty = paperSize === '80mm' ? 4 : 3;
+  const colPrice = paperSize === '80mm' ? 15 : 12;
+
+  const formatTableRow = (col1Text, col2Qty, col3Price) => {
+    const qStr = String(col2Qty ?? "");
+    const pStr = typeof col3Price === "number" ? formatCurrency(col3Price) : String(col3Price ?? "");
+    const nameStr = String(col1Text ?? "");
+    
+    if (nameStr.length <= colName && pStr.length <= colPrice) {
+      return padRight(nameStr, colName) + " " + padLeft(qStr, colQty) + " " + padLeft(pStr, colPrice) + "\n";
+    } else {
+      // If name is long, print name on first line and place Qty & Total strictly aligned in their columns on next line
+      return nameStr + "\n" + " ".repeat(colName) + " " + padLeft(qStr, colQty) + " " + padLeft(pStr, colPrice) + "\n";
+    }
+  };
+
   let text = "";
 
   // Initialize printer
@@ -356,62 +376,30 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
       text += '\x1B\x45\x01';
       text += `[ ${group.category.toUpperCase()} ]\n`;
       text += '\x1B\x45\x00';
-      text += padRight("Menu", 15) + " " + padLeft("Qty", 3) + " " + padLeft("Total", 12) + "\n";
+      text += padRight("Menu", colName) + " " + padLeft("Qty", colQty) + " " + padLeft("Total", colPrice) + "\n";
 
       group.items.forEach(item => {
-        let name = item.name || "";
-        const qtyStr = String(item.qty || 0);
-        const priceStr = formatCurrency(item.total);
-        if (name.length <= 14 && priceStr.length <= 13) {
-          text += padRight(name, 14) + " " + padLeft(qtyStr, 3) + " " + padLeft(priceStr, 13) + "\n";
-        } else {
-          text += name + "\n";
-          text += "   " + padRight(qtyStr + "x", 6) + padLeft(priceStr, WIDTH - 9) + "\n";
-        }
+        text += formatTableRow(item.name, item.qty, item.total);
       });
 
       // Subtotal per category
       text += "-".repeat(WIDTH) + "\n";
       text += '\x1B\x45\x01';
-      const subCatLabel = `Subtotal ${group.category}`;
-      const subCatQty = String(group.totalQty || 0);
-      const subCatTotal = formatCurrency(group.subtotal || 0);
-      if (subCatLabel.length <= 14 && subCatTotal.length <= 13) {
-        text += padRight(subCatLabel, 14) + " " + padLeft(subCatQty, 3) + " " + padLeft(subCatTotal, 13) + "\n";
-      } else {
-        text += subCatLabel + "\n";
-        text += "   " + padRight("Tot: " + subCatQty + "x", 10) + padLeft(subCatTotal, WIDTH - 13) + "\n";
-      }
+      text += formatTableRow(`Subtotal ${group.category}`, group.totalQty, group.subtotal);
       text += '\x1B\x45\x00';
     });
   } else if (settlementData.items && settlementData.items.length > 0) {
-    text += padRight("Menu", 15) + " " + padLeft("Qty", 3) + " " + padLeft("Total", 12) + "\n";
+    text += padRight("Menu", colName) + " " + padLeft("Qty", colQty) + " " + padLeft("Total", colPrice) + "\n";
     settlementData.items.forEach(item => {
-      let name = item.name || "";
-      const qtyStr = String(item.qty || 0);
-      const priceStr = formatCurrency(item.total);
-      if (name.length <= 14 && priceStr.length <= 13) {
-        text += padRight(name, 14) + " " + padLeft(qtyStr, 3) + " " + padLeft(priceStr, 13) + "\n";
-      } else {
-        text += name + "\n";
-        text += "   " + padRight(qtyStr + "x", 6) + padLeft(priceStr, WIDTH - 9) + "\n";
-      }
+      text += formatTableRow(item.name, item.qty, item.total);
     });
   } else {
-    text += padRight("(Tidak ada item)", 15) + "   0 " + padLeft(formatCurrency(0), 12) + "\n";
+    text += formatTableRow("(Tidak ada item)", 0, 0);
   }
 
   text += "=".repeat(WIDTH) + "\n";
   text += '\x1B\x45\x01';
-  const subLabel = `TOTAL ${settlementData.categoryHeader || 'CAFE & COURT'}`;
-  const subQty = String(settlementData.itemsTotalQty || 0);
-  const subTotal = formatCurrency(settlementData.itemsSubtotal || 0);
-  if (subLabel.length <= 14 && subTotal.length <= 13) {
-    text += padRight(subLabel, 14) + " " + padLeft(subQty, 3) + " " + padLeft(subTotal, 13) + "\n";
-  } else {
-    text += subLabel + "\n";
-    text += "   " + padRight("Tot: " + subQty + "x", 10) + padLeft(subTotal, WIDTH - 13) + "\n";
-  }
+  text += formatTableRow(`TOTAL ${settlementData.categoryHeader || 'CAFE & COURT'}`, settlementData.itemsTotalQty, settlementData.itemsSubtotal);
   text += '\x1B\x45\x00';
   text += "\n";
 
@@ -419,29 +407,19 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
   text += '\x1B\x45\x01';
   text += "PROMO\n";
   text += '\x1B\x45\x00';
-  text += padRight("Promo", 15) + " " + padLeft("Qty", 3) + " " + padLeft("Potongan", 12) + "\n";
+  text += padRight("Promo", colName) + " " + padLeft("Qty", colQty) + " " + padLeft("Potongan", colPrice) + "\n";
   
   if (settlementData.promos && settlementData.promos.length > 0) {
     settlementData.promos.forEach(p => {
-      let pName = p.name || "";
-      const pQty = String(p.qty || 0);
-      const pDisc = formatCurrency(p.discount || 0);
-      if (pName.length <= 14 && pDisc.length <= 13) {
-        text += padRight(pName, 14) + " " + padLeft(pQty, 3) + " " + padLeft(pDisc, 13) + "\n";
-      } else {
-        text += pName + "\n";
-        text += "   " + padRight(pQty + "x", 6) + padLeft(pDisc, WIDTH - 9) + "\n";
-      }
+      text += formatTableRow(p.name, p.qty, p.discount);
     });
   } else {
-    text += padRight("-", 15) + "   0 " + padLeft(formatCurrency(0), 12) + "\n";
+    text += formatTableRow("-", 0, 0);
   }
 
   text += "-".repeat(WIDTH) + "\n";
   text += '\x1B\x45\x01';
-  const totPromoQty = String(settlementData.totalPromoQty || 0);
-  const totPromoDisc = formatCurrency(settlementData.totalPromoDiscount || 0);
-  text += padRight("Tot Potongan", 14) + " " + padLeft(totPromoQty, 3) + " " + padLeft(totPromoDisc, 13) + "\n";
+  text += formatTableRow("Tot Potongan", settlementData.totalPromoQty, settlementData.totalPromoDiscount);
   text += '\x1B\x45\x00';
   text += "\n";
 
@@ -449,29 +427,19 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
   text += '\x1B\x45\x01';
   text += "PAYMENT METHOD\n";
   text += '\x1B\x45\x00';
-  text += padRight("Metode", 15) + " " + padLeft("Qty", 3) + " " + padLeft("Total", 12) + "\n";
+  text += padRight("Metode", colName) + " " + padLeft("Qty", colQty) + " " + padLeft("Total", colPrice) + "\n";
   
   if (settlementData.paymentMethods && settlementData.paymentMethods.length > 0) {
     settlementData.paymentMethods.forEach(pm => {
-      let pmName = pm.name || "";
-      const pmQty = String(pm.qty || 0);
-      const pmTot = formatCurrency(pm.total || 0);
-      if (pmName.length <= 14 && pmTot.length <= 13) {
-        text += padRight(pmName, 14) + " " + padLeft(pmQty, 3) + " " + padLeft(pmTot, 13) + "\n";
-      } else {
-        text += pmName + "\n";
-        text += "   " + padRight(pmQty + "x", 6) + padLeft(pmTot, WIDTH - 9) + "\n";
-      }
+      text += formatTableRow(pm.name, pm.qty, pm.total);
     });
   } else {
-    text += padRight("-", 15) + "   0 " + padLeft(formatCurrency(0), 12) + "\n";
+    text += formatTableRow("-", 0, 0);
   }
 
   text += "-".repeat(WIDTH) + "\n";
   text += '\x1B\x45\x01';
-  const totPayQty = String(settlementData.totalPaymentsQty || 0);
-  const totPayAmt = formatCurrency(settlementData.totalPaymentsAmount || 0);
-  text += padRight("Tot Pembayaran", 14) + " " + padLeft(totPayQty, 3) + " " + padLeft(totPayAmt, 13) + "\n";
+  text += formatTableRow("Tot Pembayaran", settlementData.totalPaymentsQty, settlementData.totalPaymentsAmount);
   text += '\x1B\x45\x00';
   text += "\n";
 
@@ -483,11 +451,12 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
   const discTot = formatCurrency(settlementData.totalDiscount || 0);
   const grandTot = formatCurrency(settlementData.grandTotal || 0);
 
-  text += padRight("Total Transaksi", 15) + " " + padLeft(txTot, 16) + "\n";
-  text += padRight("Total Discount", 15) + " " + padLeft("-" + discTot, 16) + "\n";
+  const colLabel = WIDTH - 16;
+  text += padRight("Total Transaksi", colLabel) + padLeft(txTot, 16) + "\n";
+  text += padRight("Total Discount", colLabel) + padLeft("-" + discTot, 16) + "\n";
   text += "-".repeat(WIDTH) + "\n";
   text += '\x1B\x45\x01';
-  text += padRight("Grand Total", 15) + " " + padLeft(grandTot, 16) + "\n";
+  text += padRight("Grand Total", colLabel) + padLeft(grandTot, 16) + "\n";
   text += '\x1B\x45\x00';
   text += "-".repeat(WIDTH) + "\n";
 
