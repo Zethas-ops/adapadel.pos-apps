@@ -669,9 +669,9 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
           <div class="font-bold uppercase text-black text-[11px] mb-1">[ ${group.category} ]</div>
           <table class="w-full text-left border-collapse" style="table-layout: fixed;">
             <colgroup>
-              <col style="width: 48%;" />
-              <col style="width: 18%;" />
-              <col style="width: 34%;" />
+              <col style="width: 45%;" />
+              <col style="width: 15%;" />
+              <col style="width: 40%;" />
             </colgroup>
             <thead>
               <tr class="border-b border-dashed border-gray-400">
@@ -761,9 +761,9 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
         <!-- Total Section 1 -->
         <table class="w-full text-left border-collapse mt-2" style="table-layout: fixed;">
           <colgroup>
-            <col style="width: 48%;" />
-            <col style="width: 18%;" />
-            <col style="width: 34%;" />
+            <col style="width: 45%;" />
+            <col style="width: 15%;" />
+            <col style="width: 40%;" />
           </colgroup>
           <tfoot>
             <tr class="border-t-2 border-dashed border-gray-900 font-bold text-black">
@@ -782,9 +782,9 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
         <div class="font-bold uppercase text-black text-xs mb-1">PROMO</div>
         <table class="w-full text-left border-collapse" style="table-layout: fixed;">
           <colgroup>
-            <col style="width: 48%;" />
-            <col style="width: 18%;" />
-            <col style="width: 34%;" />
+            <col style="width: 45%;" />
+            <col style="width: 15%;" />
+            <col style="width: 40%;" />
           </colgroup>
           <thead>
             <tr class="border-b border-dashed border-gray-400">
@@ -811,9 +811,9 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
         <div class="font-bold uppercase text-black text-xs mb-1">PAYMENT METHOD</div>
         <table class="w-full text-left border-collapse" style="table-layout: fixed;">
           <colgroup>
-            <col style="width: 48%;" />
-            <col style="width: 18%;" />
-            <col style="width: 34%;" />
+            <col style="width: 45%;" />
+            <col style="width: 15%;" />
+            <col style="width: 40%;" />
           </colgroup>
           <thead>
             <tr class="border-b border-dashed border-gray-400">
