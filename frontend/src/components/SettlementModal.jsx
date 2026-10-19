@@ -345,7 +345,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
     try {
       const escPosText = formatSettlementReceiptEscPos(settlementData, {
           paperSize,
-          compactFont: fontSize === "compact"
+          compactFont: false
         });
       await printViaBluetooth(escPosText);
       setBluetoothStatus("Berhasil dicetak via Bluetooth!");

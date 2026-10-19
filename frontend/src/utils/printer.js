@@ -297,7 +297,9 @@ export const printViaBluetooth = async (textToPrint) => {
 
 export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
   const paperSize = options.paperSize || '58mm';
-  const compactFont = options.compactFont !== false;
+  // Use standard Font A by default so hardware line buffer matches WIDTH (32 on 58mm, 42 on 80mm).
+  // This ensures the centered Store Profile & Address is 100% aligned with the Menu tables below.
+  const compactFont = options.compactFont === true;
   const WIDTH = paperSize === '80mm' ? 42 : 32;
 
   // Safe padding functions that NEVER truncate characters or slice numbers
@@ -310,6 +312,29 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
     return str.length >= len ? str : " ".repeat(len - str.length) + str;
   };
   const formatCurrency = (num) => "Rp " + Number(num || 0).toLocaleString('id-ID');
+
+  // Word wrap helper to ensure long store names or addresses never break mid-word
+  const wrapText = (str, maxLen) => {
+    if (!str) return [];
+    const rawLines = String(str).split(/\r?\n/);
+    const finalLines = [];
+    rawLines.forEach(rawLine => {
+      const words = rawLine.trim().split(/\s+/).filter(Boolean);
+      let currentLine = "";
+      words.forEach(word => {
+        if (!currentLine) {
+          currentLine = word;
+        } else if (currentLine.length + 1 + word.length <= maxLen) {
+          currentLine += " " + word;
+        } else {
+          finalLines.push(currentLine);
+          currentLine = word;
+        }
+      });
+      if (currentLine) finalLines.push(currentLine);
+    });
+    return finalLines;
+  };
 
   // Strict column layout so Header and Data rows are 100% aligned:
   // 58mm: colName(15) + 1 space + colQty(3) + 1 space + colPrice(12) = 32 chars
@@ -336,7 +361,7 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
   // Initialize printer
   text += '\x1B\x40'; // Reset / Init printer
 
-  // Font size: If compactFont, select Font B (smaller font) to fit 58mm perfectly without cutoffs
+  // Font size: Font A (standard 32 cols on 58mm) guarantees perfect alignment across header, tables, and totals
   if (compactFont) {
     text += '\x1B\x21\x01'; // ESC ! 1: Select Font B (condensed)
   } else {
@@ -344,12 +369,18 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
   }
 
   // Header - Centered
-  text += '\x1B\x61\x01';
+  text += '\x1B\x61\x01'; // Center align
   text += '\x1B\x45\x01'; // Bold
-  text += (settlementData.storeProfile?.store_name || "NAMA KAFE & COFFEE SHOP") + "\n";
+  const storeName = settlementData.storeProfile?.store_name || "NAMA KAFE & COFFEE SHOP";
+  wrapText(storeName, WIDTH).forEach(line => {
+    text += line + "\n";
+  });
   text += '\x1B\x45\x00'; // Bold off
+
   if (settlementData.storeProfile?.address) {
-    text += settlementData.storeProfile.address + "\n";
+    wrapText(settlementData.storeProfile.address, WIDTH).forEach(line => {
+      text += line + "\n";
+    });
   }
   if (settlementData.storeProfile?.phone) {
     text += `Telp: ${settlementData.storeProfile.phone}\n`;
@@ -836,7 +867,7 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
 
 export const printSettlementReceipt = async (settlementData, options = {}) => {
   const paperSize = options.paperSize || "58mm";
-  const compactFont = options.compactFont !== false;
+  const compactFont = options.compactFont === true;
 
   let escPosText = "";
   try {
