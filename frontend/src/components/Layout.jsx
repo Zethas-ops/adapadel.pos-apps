@@ -13,7 +13,10 @@ import {
   CreditCard,
   LogOut,
   ChevronLeft,
-  Menu as MenuIcon
+  Menu as MenuIcon,
+  Coffee,
+  Maximize2,
+  Minimize2
 } from "lucide-react";
 
 function Layout() {
@@ -51,6 +54,47 @@ function Layout() {
   ];
 
   const [theme, setTheme] = React.useState(localStorage.getItem('theme') || 'light');
+  const [isFullscreen, setIsFullscreen] = React.useState(
+    () => typeof document !== "undefined" && !!(document.fullscreenElement || document.webkitFullscreenElement)
+  );
+
+  // Sync fullscreen state with browser changes (e.g. Esc key or F11)
+  React.useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!(document.fullscreenElement || document.webkitFullscreenElement));
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        const elem = document.documentElement;
+        if (elem.requestFullscreen) {
+          await elem.requestFullscreen();
+        } else if (elem.webkitRequestFullscreen) {
+          await elem.webkitRequestFullscreen();
+        } else if (elem.msRequestFullscreen) {
+          await elem.msRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          await document.webkitExitFullscreen();
+        } else if (document.msExitFullscreen) {
+          await document.msExitFullscreen();
+        }
+      }
+    } catch (err) {
+      console.warn("Fullscreen toggle error:", err);
+    }
+  };
 
   // Apply theme on load and when state changes
   React.useEffect(() => {
@@ -85,13 +129,24 @@ function Layout() {
               {user && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate max-w-[140px]">{user.username}</p>}
               </div>
               )}
+              <div className={`flex ${isSidebarOpen ? 'items-center gap-1.5' : 'flex-col gap-1.5'} flex-shrink-0`}>
+            <button
+              onClick={toggleFullscreen}
+              className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center justify-center cursor-pointer"
+              title={isFullscreen ? "Keluar Layar Penuh (Exit Fullscreen)" : "Layar Penuh (Fullscreen)"}
+              aria-label="Toggle Fullscreen"
+            >
+              {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            </button>
           <button
             onClick={toggleTheme}
-            className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex-shrink-0"
+            className="p-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center justify-center cursor-pointer"
             title="Toggle Dark Mode"
+            aria-label="Toggle Dark Mode"
           >
             {theme === 'dark' ? <div>☀️</div> : <div>🌙</div>}
           </button>
+          </div>
         </div>
         
         <nav className="flex-1 overflow-y-auto p-3 space-y-1">
