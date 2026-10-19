@@ -602,7 +602,8 @@ function Dashboard() {
 
       const printRes = await printSettlementReceipt(settlementData, {
         paperSize: "58mm",
-        compactFont: true
+        compactFont: false,
+        fontSize: "normal"
       });
 
       if (printRes.method === "bluetooth") {
