@@ -884,8 +884,8 @@ export const printSettlementReceipt = async (settlementData, options = {}) => {
       return { success: true, method: "bluetooth", deviceName: getConnectedPrinterName() };
     } catch (btErr) {
       console.warn("Active Bluetooth print failed, falling back to browser print:", btErr);
-      const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
-      printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
+      const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "normal" });
+      printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "normal" });
       return { success: true, method: "browser", fallbackReason: btErr.message };
     }
   }
@@ -897,15 +897,15 @@ export const printSettlementReceipt = async (settlementData, options = {}) => {
       return { success: true, method: "bluetooth", deviceName: getConnectedPrinterName() };
     } catch (btErr) {
       console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
-      const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
-      printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
+      const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "normal" });
+      printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "normal" });
       return { success: true, method: "browser", fallbackReason: btErr.message };
     }
   }
 
   // 3. Browser Print Dialog Fallback
-  const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
-  printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
+  const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "normal" });
+  printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "normal" });
   return { success: true, method: "browser" };
 };
 
