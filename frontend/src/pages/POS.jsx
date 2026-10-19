@@ -870,25 +870,23 @@ function POS() {
     return true;
   });
   return <div className="flex h-screen bg-gray-50 dark:bg-gray-900 overflow-hidden">
-      {
-    /* Left Side - Menu */
-  }
-      <div className="flex-1 flex flex-col h-full border-r border-gray-200 dark:border-gray-700">
-        {
-    /* Header */
-  }
+      {/* Left Side - Menu */}
+      <div className="flex-1 min-w-0 flex flex-col h-full border-r border-gray-200 dark:border-gray-700">
+        {/* Header */}
         <div className="p-5 bg-white dark:bg-gray-800 border-b flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="flex space-x-2 overflow-x-auto pb-2 w-full sm:w-auto">
-            {categories.map((cat) => <button
-    key={cat}
-    onClick={() => setActiveCategory(cat)}
-    className={clsx(
-      "px-4 py-2 rounded-full whitespace-nowrap font-medium transition-colors",
-      activeCategory === cat ? "bg-blue-600 text-white" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:bg-gray-600"
-    )}
-  >
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat)}
+                className={clsx(
+                  "px-4 py-2 rounded-full whitespace-nowrap font-medium transition-colors",
+                  activeCategory === cat ? "bg-blue-600 text-white" : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:bg-gray-600"
+                )}
+                >
                 {cat}
-              </button>)}
+              </button>)
+            )}
           </div>
           <div className="relative w-full sm:w-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
@@ -902,44 +900,63 @@ function POS() {
           </div>
         </div>
 
-        {
-    /* Menu Grid */
-  }
+        {/* Menu Grid - Flexible auto-fill grid based on available space */}
         <div className="flex-1 overflow-y-auto p-4">
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(165px,1fr))] gap-3 sm:gap-3.5">
             {filteredMenu.map((item) => {
     const currentMaxQty = getMenuMaxQty(item);
     const outOfStock = currentMaxQty <= 0;
-    return <div
+    const nameLen = (item.name || "").length;
+              const titleSizeClass = 
+                nameLen > 32 ? "text-[11px] leading-tight" :
+                nameLen > 20 ? "text-xs leading-snug" :
+                "text-sm leading-snug";
+
+    return (
+      <div
       key={item.menu_id}
       onClick={() => !outOfStock && handleMenuClick(item)}
-      className={`bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col h-32 ${outOfStock ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:shadow-md transition-shadow"}`}
+      className={`bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden flex flex-col min-h-[130px] h-auto transition-all ${
+                    outOfStock
+                      ? "opacity-50 cursor-not-allowed"
+                      : "cursor-pointer hover:shadow-md hover:border-blue-300 dark:hover:border-blue-600 active:scale-[0.98]"
+                  }`}
       >
-                 <div className="p-4 flex-1 flex flex-col justify-between relative">
+                 <div className="p-3.5 flex-1 flex flex-col justify-between">
                   <div>
-                    <div className="flex justify-between items-start mb-2 gap-2">
-                      <h3 className="font-semibold text-gray-800 dark:text-gray-100 leading-tight">{item.name}</h3>
-                      <span className="bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-[10px] font-bold text-gray-600 dark:text-gray-300 whitespace-nowrap">{item.category}</span>
+                    <div className="flex justify-between items-start gap-1.5 mb-2">
+                        <h3 className={`font-semibold text-gray-800 dark:text-gray-100 break-words ${titleSizeClass}`}>
+                      {item.name}
+                        </h3>
+                        {item.category && (
+                          <span className="bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded text-[10px] font-bold text-gray-600 dark:text-gray-300 shrink-0 self-start">
+                            {item.category}
+                          </span>
+                        )}
                     </div>
-                    <p className="text-blue-600 dark:text-blue-400 font-bold">Rp {Number(item.price || 0).toLocaleString("id-ID")}</p>
-                  </div>
+                    </div>
+                    <div className="pt-2 mt-auto">
+                    <p className="text-blue-600 dark:text-blue-400 font-bold">Rp {Number(item.price || 0).toLocaleString("id-ID")}
+                    </p>
                   {outOfStock && (
-                    <div className="mt-3">
-                      <span className="text-white font-bold px-2 py-1 bg-red-500 rounded text-xs">Out of Stock</span>
-                    </div>
-                  )}
+                     <div className="mt-1.5">
+                        <span className="text-white font-bold px-2 py-0.5 bg-red-500 rounded text-[10px] uppercase tracking-wider inline-block">
+                          Out of Stock
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>;
-            })}
+              </div>
+              );
+             })}
           </div>
         </div>
       </div>
 
-      {
-    /* Right Side - Cart */
-  }
-      <div className="w-96 bg-white dark:bg-gray-800 flex flex-col h-full shadow-xl z-10">
-        <div className="p-7.5 border-b bg-gray-50 dark:bg-gray-900 flex justify-between items-center">
+      {/* Right Side - Cart (Fixed & Consistent Width on Zoom In / Zoom Out / Fullscreen) */}
+      <div className="w-[390px] xl:w-[410px] min-w-[390px] max-w-[410px] shrink-0 flex-shrink-0 bg-white dark:bg-gray-800 flex flex-col h-full shadow-xl z-10">
+        <div className="p-5 border-b bg-gray-50 dark:bg-gray-900 flex justify-between items-center shrink-0">
           <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">Current Order</h2>
           <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-bold">
             {cart.length} items
@@ -982,10 +999,8 @@ function POS() {
               </div>)}
         </div>
 
-        {
-    /* Checkout Section */
-  }
-        <div className="p-4 border-t bg-white dark:bg-gray-800 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+        {/* Checkout Section */}
+        <div className="p-4 border-t bg-white dark:bg-gray-800 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] shrink-0">
           <div className="space-y-3 mb-4">
             <div className="flex space-x-3">
               <div className="flex-1">
