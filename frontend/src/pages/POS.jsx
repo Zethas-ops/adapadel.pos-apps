@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Plus, Minus, Trash2, Search, X, Check, ShoppingBag } from "lucide-react";
+import { Plus, Minus, Trash2, Search, X, Check, ShoppingBag, RefreshCw, Loader2 } from "lucide-react";
 import { clsx } from "clsx";
 import { useLocation } from "react-router-dom";
 import moment from "moment-timezone";
@@ -47,9 +47,21 @@ function POS() {
   const [splitPayments, setSplitPayments] = useState([]);
   const [cashAmount, setCashAmount] = useState("");
   const [qrisData, setQrisData] = useState(null);
+  
+  // Operation progress states & synchronous ref locks
   const [isProcessing, setIsProcessing] = useState(false);
   const isProcessingRef = useRef(false);
 
+  const [isAddingItem, setIsAddingItem] = useState(false);
+  const isAddingItemRef = useRef(false);
+
+  const [isSavingBill, setIsSavingBill] = useState(false);
+  const isSavingBillRef = useRef(false);
+  const draftBillIdRef = useRef(null);
+
+  const [isPaying, setIsPaying] = useState(false);
+  const isPayingRef = useRef(false);
+  const clientTxIdRef = useRef(null);
   const getSufficientPayment = () => {
     if (paymentMethod === "Split Payment") {
       const totalSplit = splitPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
@@ -480,10 +492,18 @@ function POS() {
     return false;
   };
   const handleAddToCart = () => {
-    if (!selectedMenu) return;
+    if (!selectedMenu || isAddingItemRef.current || isAddingItem) return;
+    isAddingItemRef.current = true;
+    setIsAddingItem(true);
+    try {
     const price = selectedMenu.price;
     const addonsPrice = selectedAddons.reduce((sum, a) => sum + a.price, 0);
     const subtotal = (price + addonsPrice) * qty;
+    const maxAllowed = getMaxAllowedQty();
+      if (qty > maxAllowed) {
+        alert("Cannot exceed available stock");
+        return;
+      }
     const newItem = {
       menu_id: selectedMenu.menu_id,
       menu_name: selectedMenu.name,
@@ -494,7 +514,7 @@ function POS() {
       addons: selectedAddons,
       note: itemNote.trim(),
       subtotal,
-      maxQty: getMaxAllowedQty()
+      maxQty: maxAllowed
     };
     const existingIndex = cart.findIndex(
       (item) => item.menu_id === newItem.menu_id && item.drink_type === newItem.drink_type && item.sugar_level === newItem.sugar_level && JSON.stringify(item.addons) === JSON.stringify(newItem.addons) && (item.note || "") === newItem.note && !(item.is_auto_free)
@@ -512,6 +532,12 @@ function POS() {
       setCart([...cart, newItem]);
     }
     setShowOptions(false);
+     } finally {
+      setTimeout(() => {
+        isAddingItemRef.current = false;
+        setIsAddingItem(false);
+      }, 300);
+    }
   };
   const updateCartQty = (index, delta) => {
     const newCart = [...cart];
@@ -605,11 +631,13 @@ function POS() {
     setShowPayment(true);
   };
   const processPayment = async () => {
-    if (isProcessingRef.current) return;
+    if (isPayingRef.current || isProcessingRef.current) return;
+    isPayingRef.current = true;
+    isProcessingRef.current = true;
+    setIsPaying(true);
     isProcessingRef.current = true;
     setIsProcessing(true);
     try {
-      // 1. Create transaction record
       const actualCustomerName = customerName || "Guest";
       const finalCustomerName = transactionNote ? `${actualCustomerName} - Note: ${transactionNote}` : actualCustomerName;
       
@@ -620,7 +648,7 @@ function POS() {
       if (paymentMethod === "Split Payment") {
         finalPaymentMethod = splitPayments.map(p => `${p.method} (Rp ${Number(p.amount).toLocaleString('id-ID')})`).join(', ');
         const totalSplit = splitPayments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-        finalCash = totalSplit; // Store total paid as cash_amount conceptually
+        finalCash = totalSplit;
         finalChange = Math.max(0, totalSplit - totals.total);
       }
       
@@ -628,13 +656,42 @@ function POS() {
       const user = userStr ? JSON.parse(userStr) : null;
       const cashierName = user ? user.username : 'Unknown';
 
-      let initialNotes = null;
+       // Idempotency: generate or reuse client transaction token
+      if (!clientTxIdRef.current) {
+        clientTxIdRef.current = `tx_idem_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      }
+      const idempotencyKey = clientTxIdRef.current;
+
+      // 1. Check if transaction was already created for this idempotencyKey (e.g. on network retry)
+      let transaction = null;
+      try {
+        const { data: existingTxList, error: checkError } = await supabase
+          .from('transactions')
+          .select('*, transaction_items(*)')
+          .ilike('notes', `%"idempotency_key":"${idempotencyKey}"%`)
+          .limit(1);
+
+        if (!checkError && existingTxList && existingTxList.length > 0) {
+          transaction = existingTxList[0];
+          console.log("Idempotent retry: Transaction already exists #", transaction.transaction_id);
+        }
+      } catch (checkErr) {
+        console.warn("Idempotency lookup error:", checkErr);
+      }
+
+      if (!transaction) {
+        // Build initial notes JSON including idempotency key
+        let notesObj = { idempotency_key: idempotencyKey };
       if (selectedPromoId) {
         const promo = promos.find(p => p.promo_id.toString() === selectedPromoId);
         if (promo) {
-          initialNotes = JSON.stringify({ promo_name: promo.title });
+          notesObj.promo_name = promo.title;
         }
       }
+      if (transactionNote) {
+          notesObj.transaction_note = transactionNote;
+        }
+        const initialNotes = JSON.stringify(notesObj);
 
       const { data: transaction, error: txError } = await supabase
         .from('transactions')
@@ -656,6 +713,7 @@ function POS() {
         .single();
 
       if (txError) throw txError;
+      transaction = newTx;
 
       // 2. Create transaction items
       const txItems = cart.map(item => {
@@ -681,13 +739,12 @@ function POS() {
 
       if (itemsError) throw itemsError;
 
-      // 3. Update inventory stock
+      // 3. Update inventory stock (executed only once per idempotencyKey)
       for (const item of cart) {
         const menuItem = menu.find(m => m.menu_id === item.menu_id);
         if (menuItem && menuItem.recipes) {
           for (const recipe of menuItem.recipes) {
             const usage = recipe.usage_amount * item.qty;
-            // Get current stock
             const { data: ing, error: ingError } = await supabase
               .from('ingredients')
               .select('current_stock')
@@ -697,7 +754,7 @@ function POS() {
             if (!ingError && ing) {
               await supabase
                 .from('ingredients')
-                .update({ current_stock: ing.current_stock - usage })
+                .update({ current_stock: Math.max(0, ing.current_stock - usage) })
                 .eq('ingredient_id', recipe.ingredient_id);
             }
           }
@@ -719,8 +776,9 @@ function POS() {
                 if (!ingError && ing) {
                   await supabase
                     .from('ingredients')
-                    .update({ current_stock: ing.current_stock - usage })
-                    .eq('ingredient_id', recipe.ingredient_id);
+                    .update({ current_stock: Math.max(0, ing.current_stock - usage) })
+                      .eq('ingredient_id', recipe.ingredient_id);
+                  }
                 }
               }
             }
@@ -728,7 +786,7 @@ function POS() {
         }
       }
 
-      // 4. If this was an open bill, update its status
+      // 4. If this was an open bill, delete it
       if (openBillId) {
         await supabase.from('open_bill_items').delete().eq('bill_id', openBillId);
         await supabase
@@ -809,6 +867,8 @@ function POS() {
       });
       setPrintModalOpen(true);
 
+      // Successfully processed: reset state and clear idempotency token
+      clientTxIdRef.current = null;
       setCart([]);
       setTableNo("");
       setCustomerName("");
@@ -827,8 +887,10 @@ function POS() {
         alert(err.message || "Checkout failed");
       }
     } finally {
-      setIsProcessing(false);
+      isPayingRef.current = false;
+      setIsPaying(false);
       isProcessingRef.current = false;
+      setIsProcessing(false);
     }
   };
   const generateQris = async () => {
@@ -848,21 +910,24 @@ function POS() {
       return;
     }
     
-    if (isProcessingRef.current) return;
+    if (isSavingBillRef.current || isProcessingRef.current || isPayingRef.current) return;
+    isSavingBillRef.current = true;
     isProcessingRef.current = true;
+    setIsSavingBill(true);
     setIsProcessing(true);
     
     try {
-      let billId = openBillId;
+      let billId = openBillId || draftBillIdRef.current;
       const actualCustomerName = customerName || "Guest";
       const finalCustomerName = transactionNote ? `${actualCustomerName} - Note: ${transactionNote}` : actualCustomerName;
       const finalTableNo = selectedPromoId ? `${tableNo}|PROMO:${selectedPromoId}` : tableNo;
       
       // Calculate delta / added items for Captain Order
       let storedPrinted = {};
-      if (openBillId) {
+      const targetCheckId = openBillId || draftBillIdRef.current;
+      if (targetCheckId) {
         try {
-          const str = localStorage.getItem('captain_printed_' + openBillId);
+          const str = localStorage.getItem('captain_printed_' + targetCheckId);
           if (str) {
             storedPrinted = JSON.parse(str);
           }
@@ -881,7 +946,7 @@ function POS() {
       let isAdditional = false;
       let addedCount = 0;
 
-      if (openBillId && Object.keys(storedPrinted).length > 0) {
+      if (targetCheckId && Object.keys(storedPrinted).length > 0) {
         cart.forEach(item => {
           const sig = getItemSignature(item);
           const prevQty = storedPrinted[sig] || 0;
@@ -908,7 +973,23 @@ function POS() {
         addedCount = cart.reduce((s, i) => s + (i.qty || 1), 0);
       }
 
-      if (openBillId) {
+      // Idempotency: verify if billId already exists in open_bills
+      if (billId) {
+        try {
+          const { data: existingBill } = await supabase
+            .from('open_bills')
+            .select('bill_id')
+            .eq('bill_id', billId)
+            .single();
+          if (!existingBill) {
+            billId = null;
+          }
+        } catch (e) {
+          billId = null;
+        }
+      }
+
+      if (billId) {
         // Update existing open bill
         const { error: updateError } = await supabase
           .from('open_bills')
@@ -920,12 +1001,12 @@ function POS() {
             discount: totals.discount,
             total_price: totals.total,
           })
-          .eq('bill_id', openBillId);
+          .eq('bill_id', billId);
           
         if (updateError) throw updateError;
         
         // Delete old items
-        await supabase.from('open_bill_items').delete().eq('bill_id', openBillId);
+        await supabase.from('open_bill_items').delete().eq('bill_id', billId);
       } else {
         // Create new open bill
         const { data: newBill, error: insertError } = await supabase
@@ -944,6 +1025,7 @@ function POS() {
           
         if (insertError) throw insertError;
         billId = newBill.bill_id;
+        draftBillIdRef.current = billId; // Cache ID so any retry updates this bill
       }
       
       // Insert items with modifiers encoded
@@ -1004,6 +1086,7 @@ function POS() {
       });
       setPrintModalOpen(true);
 
+      draftBillIdRef.current = null;
       setCart([]);
       setTableNo("");
       setCustomerName("");
@@ -1017,6 +1100,9 @@ function POS() {
         alert(err.message || "Failed to save open bill");
       }
     } finally {
+      isSavingBillRef.current = false;
+      setIsSavingBill(false);
+      isProcessingRef.current = false;
       setIsProcessing(false);
       isProcessingRef.current = false;
     }
@@ -1235,14 +1321,23 @@ function POS() {
           <div className="grid grid-cols-2 gap-3">
             <button
     onClick={saveOpenBill}
-    className="py-3 px-4 bg-orange-100 text-orange-700 font-bold rounded-xl hover:bg-orange-200 transition-colors"
-  >
-              Save Bill
+    disabled={isSavingBill || isProcessing || isPaying || cart.length === 0}
+              className="py-3 px-4 bg-orange-100 text-orange-700 font-bold rounded-xl hover:bg-orange-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center space-x-2"
+            >
+              {isSavingBill ? (
+                <>
+                  <RefreshCw size={16} className="animate-spin" />
+                  <span>Menyimpan Pesanan...</span>
+                </>
+              ) : (
+                <span>Save Bill</span>
+              )}
             </button>
             <button
     onClick={handleCheckout}
-    className="py-3 px-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors shadow-md shadow-blue-200"
-  >
+    disabled={isSavingBill || isProcessing || isPaying || cart.length === 0}
+              className="py-3 px-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-md shadow-blue-200 flex items-center justify-center space-x-2"
+            >
               Pay Now
             </button>
           </div>
@@ -1380,9 +1475,17 @@ function POS() {
             <div className="p-4 border-t bg-gray-50 dark:bg-gray-900">
               <button
     onClick={handleAddToCart}
-    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl transition-colors shadow-lg shadow-blue-200"
-  >
-                Add to Order - Rp {Number(((selectedMenu.price + selectedAddons.reduce((s, a) => s + a.price, 0)) * qty) || 0).toLocaleString("id-ID")}
+    disabled={isAddingItem || getMaxAllowedQty() <= 0}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-4 rounded-xl transition-colors shadow-lg shadow-blue-200 flex items-center justify-center space-x-2"
+              >
+                {isAddingItem ? (
+                  <>
+                    <RefreshCw size={18} className="animate-spin" />
+                    <span>Menambahkan ke Order...</span>
+                  </>
+                ) : (
+                  <span>Add to Order - Rp {Number(((selectedMenu.price + selectedAddons.reduce((s, a) => s + a.price, 0)) * qty) || 0).toLocaleString("id-ID")}</span>
+                )}
               </button>
             </div>
           </div>
@@ -1536,10 +1639,17 @@ function POS() {
             <div className="p-4 border-t bg-gray-50 dark:bg-gray-900">
               <button
     onClick={processPayment}
-    disabled={isProcessing || !getSufficientPayment()}
-    className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold py-4 rounded-xl transition-colors shadow-lg shadow-green-200"
-  >
-                {isProcessing ? "Processing..." : "Complete Payment"}
+    disabled={isProcessing || isPaying || !getSufficientPayment()}
+                className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold py-4 rounded-xl transition-colors shadow-lg shadow-green-200 flex items-center justify-center space-x-2"
+              >
+                {isProcessing || isPaying ? (
+                  <>
+                    <RefreshCw size={18} className="animate-spin" />
+                    <span>Memproses Pembayaran...</span>
+                  </>
+                ) : (
+                  <span>Selesaikan Pembayaran</span>
+                )}
               </button>
             </div>
           </div>

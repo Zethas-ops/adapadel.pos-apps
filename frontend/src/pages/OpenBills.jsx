@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Search, Edit, CheckCircle, ChefHat } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import moment from "moment-timezone";
@@ -12,6 +12,7 @@ function OpenBills() {
   const [search, setSearch] = useState("");
   const [storeProfile, setStoreProfile] = useState(null);
   const [printingBillId, setPrintingBillId] = useState(null);
+  const isPrintingCaptainRef = useRef(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -50,7 +51,8 @@ function OpenBills() {
   };
   
   const handlePrintCaptain = async (bill) => {
-    if (printingBillId) return;
+    if (isPrintingCaptainRef.current || printingBillId !== null) return;
+    isPrintingCaptainRef.current = true;
     setPrintingBillId(bill.bill_id);
     try {
       const orderInfo = {
@@ -64,6 +66,7 @@ function OpenBills() {
     } catch (err) {
       console.error("Error printing captain order:", err);
     } finally {
+      isPrintingCaptainRef.current = false;
       setPrintingBillId(null);
     }
   };
@@ -128,12 +131,12 @@ function OpenBills() {
                 </button>
                 <button
                  onClick={() => handlePrintCaptain(bill)}
-                  disabled={printingBillId === bill.bill_id}
-                  className="flex items-center justify-center space-x-1.5 py-2 px-2.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold rounded-xl transition-colors shadow-sm text-xs cursor-pointer disabled:opacity-50"
+                  disabled={printingBillId !== null}
+                  className="flex items-center justify-center space-x-1.5 py-2 px-2.5 bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold rounded-xl transition-colors shadow-sm text-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Print Captain Order Ticket"
                 >
                   <ChefHat size={15} className={printingBillId === bill.bill_id ? "animate-spin" : ""} />
-                  <span>Captain</span>
+                  <span>{printingBillId === bill.bill_id ? "Mencetak..." : "Captain"}</span>
                 </button>
                 <button
                   onClick={() => handleClose(bill)}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Search, Printer, Calendar, ChevronDown, ChevronUp, Trash2, X, RefreshCcw } from "lucide-react";
 import moment from "moment-timezone";
 import { supabase } from "../lib/supabase";
@@ -21,6 +21,7 @@ function History() {
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
+  const isDeletingRef = useRef(false);
 
   const [refundModalOpen, setRefundModalOpen] = useState(false);
   const [transactionToRefund, setTransactionToRefund] = useState(null);
@@ -29,7 +30,11 @@ function History() {
   const [refundPassword, setRefundPassword] = useState("");
   const [refundError, setRefundError] = useState("");
   const [isRefunding, setIsRefunding] = useState(false);
+  const isRefundingRef = useRef(false);
   const [selectedRefundItems, setSelectedRefundItems] = useState({});
+  
+  const [reprintingTxId, setReprintingTxId] = useState(null);
+  const isReprintingRef = useRef(false);
 
   const userStr = localStorage.getItem("user");
   const user = userStr ? JSON.parse(userStr) : null;
@@ -87,6 +92,10 @@ function History() {
     }
   };
   const handleReprint = async (transaction) => {
+    if (isReprintingRef.current || reprintingTxId !== null) return;
+    isReprintingRef.current = true;
+    setReprintingTxId(transaction.transaction_id);
+
     const txDataConfig = {
       invoice_no: transaction.invoice_no || transaction.transaction_id,
       date: moment.utc(transaction.date).tz(TIMEZONE).format("YYYY-MM-DD HH:mm:ss"),
@@ -111,6 +120,9 @@ function History() {
     } catch (err) {
       console.error("Bluetooth print failed:", err);
       alert("Bluetooth print failed or was cancelled.");
+      } finally {
+      isReprintingRef.current = false;
+      setReprintingTxId(null);
     }
   };
 
@@ -147,6 +159,8 @@ function History() {
       return;
     }
     
+    if (isRefundingRef.current || isRefunding) return;
+    isRefundingRef.current = true;
     setIsRefunding(true);
     try {
        const isPartial = transactionToRefund.items.some(item => 
@@ -297,6 +311,7 @@ function History() {
       console.error("Error refunding/voiding transaction:", err);
       setRefundError(err.message || "Failed to process request.");
     } finally {
+      isRefundingRef.current = false;
       setIsRefunding(false);
     }
   };
@@ -307,6 +322,8 @@ function History() {
       return;
     }
     
+    if (isDeletingRef.current || isDeleting) return;
+    isDeletingRef.current = true;
     setIsDeleting(true);
     try {
       const { error } = await supabase
@@ -323,6 +340,7 @@ function History() {
       console.error("Error deleting transaction:", err);
       setDeleteError("Failed to delete transaction.");
     } finally {
+      isDeletingRef.current = false;
       setIsDeleting(false);
     }
   };
@@ -476,10 +494,11 @@ function History() {
                           e.stopPropagation();
                           handleReprint(t);
                         }}
-                        className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:bg-blue-900/30 rounded-lg transition-colors inline-flex items-center"
-                        title="Reprint Receipt"
+                        disabled={reprintingTxId !== null}
+                        className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:bg-blue-900/30 rounded-lg transition-colors inline-flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={reprintingTxId === t.transaction_id ? "Mencetak..." : "Reprint Receipt"}
                       >
-                        <Printer size={20} />
+                        <Printer size={20} className={reprintingTxId === t.transaction_id ? "animate-spin" : ""} />
                       </button>
                       {isAdmin && (
                         <>

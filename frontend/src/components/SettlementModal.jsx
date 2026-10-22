@@ -22,6 +22,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
   const [paperSize, setPaperSize] = useState("58mm"); // "58mm" | "80mm"
   const [fontSize, setFontSize] = useState("compact"); // "compact" | "normal" | "large"
   const receiptRef = useRef(null);
+  const isPrintingRef = useRef(false);
 
   const detectHardware = async () => {
     if (isBluetoothConnected()) {
@@ -71,7 +72,8 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
   };
 
   const handlePrint = async () => {
-    if (!settlementData) return;
+    if (!settlementData || isPrintingRef.current || isPrinting) return;
+    isPrintingRef.current = true;
     setIsPrinting(true);
     setBluetoothStatus("");
 
@@ -97,6 +99,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
         }
         setTimeout(() => setBluetoothStatus(""), 3000);
       } finally {
+        isPrintingRef.current = false;
         setIsPrinting(false);
       }
     } else {
@@ -109,6 +112,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
       } catch (err) {
         console.error("Browser print failed:", err);
       } finally {
+        isPrintingRef.current = false;
         setIsPrinting(false);
         setTimeout(() => setBluetoothStatus(""), 3000);
       }
@@ -295,10 +299,10 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
                 type="button"
                 onClick={handlePrint}
                 disabled={loading || !settlementData || isPrinting}
-                className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white font-semibold py-2 px-4 rounded-xl flex items-center space-x-2 shadow-md shadow-emerald-200 transition-all text-sm cursor-pointer whitespace-nowrap"
+                className="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2 px-4 rounded-xl flex items-center space-x-2 shadow-md shadow-emerald-200 transition-all text-sm cursor-pointer whitespace-nowrap"
                 title={`Cetak Settlement via ${hardwareName}`}
               >
-                <Printer size={16} />
+                <Printer size={16} className={isPrinting ? "animate-spin" : ""} />
                 <span>{isPrinting ? "Mencetak..." : "Print"}</span>
               </button>
             </div>

@@ -1311,89 +1311,116 @@ export const formatReceiptHtml = (storeProfile, transaction, cart, totals) => {
   `;
 };
 
+let isGlobalPrintingBusy = false;
+
+export const isPrinterBusy = () => isGlobalPrintingBusy;
+
 export const printCaptainOrder = async (storeProfile, orderInfo, items, options = {}) => {
-  const paperSize = options.paperSize || "58mm";
-
-  let escPosText = "";
+  if (isGlobalPrintingBusy) {
+    console.warn("Printer is busy. Ignoring duplicate captain order print request.");
+    return { success: false, busy: true };
+  }
+  isGlobalPrintingBusy = true;
   try {
-    escPosText = formatCaptainOrderText(storeProfile, orderInfo, items, { paperSize });
-  } catch (err) {
-    console.error("Error formatting captain order ESC/POS:", err);
-  }
+    const paperSize = options.paperSize || "58mm";
 
-  // 1. Try Bluetooth if connected
-  const hasActiveBt = isBluetoothConnected();
-  if (hasActiveBt && escPosText) {
+    let escPosText = "";
     try {
-      await printViaBluetooth(escPosText);
-      return { success: true, method: "bluetooth" };
-    } catch (btErr) {
-      console.warn("Active Bluetooth print failed, falling back to browser print:", btErr);
-      const html = formatCaptainOrderHtml(storeProfile, orderInfo, items);
-      printThermalReceiptIframe(html, { paperSize });
-      return { success: true, method: "browser", fallbackReason: btErr.message };
+      escPosText = formatCaptainOrderText(storeProfile, orderInfo, items, { paperSize });
+    } catch (err) {
+      console.error("Error formatting captain order ESC/POS:", err);
     }
-  }
 
-  // 2. Try Bluetooth device if browser supports
-  if (typeof navigator !== "undefined" && navigator.bluetooth && escPosText) {
-    try {
-      await printViaBluetooth(escPosText);
-      return { success: true, method: "bluetooth" };
-    } catch (btErr) {
-      console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
-      const html = formatCaptainOrderHtml(storeProfile, orderInfo, items);
-      printThermalReceiptIframe(html, { paperSize });
-      return { success: true, method: "browser", fallbackReason: btErr.message };
+    // 1. Try Bluetooth if connected
+    const hasActiveBt = isBluetoothConnected();
+    if (hasActiveBt && escPosText) {
+      try {
+        await printViaBluetooth(escPosText);
+        return { success: true, method: "bluetooth" };
+      } catch (btErr) {
+        console.warn("Active Bluetooth print failed, falling back to browser print:", btErr);
+        const html = formatCaptainOrderHtml(storeProfile, orderInfo, items);
+        printThermalReceiptIframe(html, { paperSize });
+        return { success: true, method: "browser", fallbackReason: btErr.message };
+      }
     }
-  }
 
-  // 3. Fallback to browser iframe print
-  const html = formatCaptainOrderHtml(storeProfile, orderInfo, items);
-  printThermalReceiptIframe(html, { paperSize });
-  return { success: true, method: "browser" };
+    // 2. Try Bluetooth device if browser supports
+    if (typeof navigator !== "undefined" && navigator.bluetooth && escPosText) {
+      try {
+        await printViaBluetooth(escPosText);
+        return { success: true, method: "bluetooth" };
+      } catch (btErr) {
+        console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
+        const html = formatCaptainOrderHtml(storeProfile, orderInfo, items);
+        printThermalReceiptIframe(html, { paperSize });
+        return { success: true, method: "browser", fallbackReason: btErr.message };
+      }
+    }
+
+    // 3. Fallback to browser iframe print
+    const html = formatCaptainOrderHtml(storeProfile, orderInfo, items);
+    printThermalReceiptIframe(html, { paperSize });
+    return { success: true, method: "browser" };
+  } finally {
+    // Add small buffer time before releasing lock to ensure hardware finishes carriage return
+    setTimeout(() => {
+      isGlobalPrintingBusy = false;
+    }, 500);
+  }
 };
 
 export const printCustomerReceipt = async (storeProfile, transaction, cart, totals, options = {}) => {
-  const paperSize = options.paperSize || "58mm";
-
-  let escPosText = "";
+  if (isGlobalPrintingBusy) {
+    console.warn("Printer is busy. Ignoring duplicate receipt print request.");
+    return { success: false, busy: true };
+  }
+  isGlobalPrintingBusy = true;
   try {
-    escPosText = formatReceiptText(storeProfile, transaction, cart, totals);
-  } catch (err) {
-    console.error("Error formatting receipt ESC/POS:", err);
-  }
+    const paperSize = options.paperSize || "58mm";
 
-  // 1. Try Bluetooth if active
-  const hasActiveBt = isBluetoothConnected();
-  if (hasActiveBt && escPosText) {
+    let escPosText = "";
     try {
-      await printViaBluetooth(escPosText);
-      return { success: true, method: "bluetooth" };
-    } catch (btErr) {
-      console.warn("Active Bluetooth print failed, falling back to browser print:", btErr);
-      const html = formatReceiptHtml(storeProfile, transaction, cart, totals);
-      printThermalReceiptIframe(html, { paperSize });
-      return { success: true, method: "browser", fallbackReason: btErr.message };
+      escPosText = formatReceiptText(storeProfile, transaction, cart, totals);
+    } catch (err) {
+      console.error("Error formatting receipt ESC/POS:", err);
     }
-  }
 
-  // 2. Try Bluetooth if available
-  if (typeof navigator !== "undefined" && navigator.bluetooth && escPosText) {
-    try {
-      await printViaBluetooth(escPosText);
-      return { success: true, method: "bluetooth" };
-    } catch (btErr) {
-      console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
-      const html = formatReceiptHtml(storeProfile, transaction, cart, totals);
-      printThermalReceiptIframe(html, { paperSize });
-      return { success: true, method: "browser", fallbackReason: btErr.message };
+    // 1. Try Bluetooth if active
+    const hasActiveBt = isBluetoothConnected();
+    if (hasActiveBt && escPosText) {
+      try {
+        await printViaBluetooth(escPosText);
+        return { success: true, method: "bluetooth" };
+      } catch (btErr) {
+        console.warn("Active Bluetooth print failed, falling back to browser print:", btErr);
+        const html = formatReceiptHtml(storeProfile, transaction, cart, totals);
+        printThermalReceiptIframe(html, { paperSize });
+        return { success: true, method: "browser", fallbackReason: btErr.message };
+      }
     }
-  }
 
-  // 3. Fallback to browser iframe print
-  const html = formatReceiptHtml(storeProfile, transaction, cart, totals);
-  printThermalReceiptIframe(html, { paperSize });
-  return { success: true, method: "browser" };
+    // 2. Try Bluetooth if available
+    if (typeof navigator !== "undefined" && navigator.bluetooth && escPosText) {
+      try {
+        await printViaBluetooth(escPosText);
+        return { success: true, method: "bluetooth" };
+      } catch (btErr) {
+        console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
+        const html = formatReceiptHtml(storeProfile, transaction, cart, totals);
+        printThermalReceiptIframe(html, { paperSize });
+        return { success: true, method: "browser", fallbackReason: btErr.message };
+      }
+    }
+
+    // 3. Fallback to browser iframe print
+    const html = formatReceiptHtml(storeProfile, transaction, cart, totals);
+    printThermalReceiptIframe(html, { paperSize });
+    return { success: true, method: "browser" };
+  } finally {
+    setTimeout(() => {
+      isGlobalPrintingBusy = false;
+    }, 500);
+  }
 };
 

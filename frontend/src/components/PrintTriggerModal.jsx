@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { X, Printer, ChefHat, Check } from "lucide-react";
+import React, { useState, useRef } from "react";
+import { X, Printer, ChefHat, Check, Loader2 } from "lucide-react";
 
 export default function PrintTriggerModal({
   isOpen,
@@ -16,6 +16,8 @@ export default function PrintTriggerModal({
 }) {
   const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
   const [isPrintingCaptain, setIsPrintingCaptain] = useState(false);
+  const isPrintingReceiptRef = useRef(false);
+  const isPrintingCaptainRef = useRef(false);
   const [receiptPrinted, setReceiptPrinted] = useState(initialReceiptPrinted);
   const [captainPrinted, setCaptainPrinted] = useState(false);
   const [message, setMessage] = useState("");
@@ -25,6 +27,8 @@ export default function PrintTriggerModal({
       setReceiptPrinted(initialReceiptPrinted);
       setCaptainPrinted(false);
       setMessage("");
+      isPrintingReceiptRef.current = false;
+      isPrintingCaptainRef.current = false;
     }
   }, [isOpen, initialReceiptPrinted]);
 
@@ -33,8 +37,11 @@ export default function PrintTriggerModal({
   const defaultTitle = type === "save_bill" ? "Bill saved successfully" : "Payment successful";
   const defaultSubtitle = "Choose what to print on your single printer.";
 
+  const isAnyPrinting = isPrintingReceipt || isPrintingCaptain;
+
   const handleReceiptClick = async () => {
-    if (!onPrintReceipt || isPrintingReceipt) return;
+    if (!onPrintReceipt || isPrintingReceiptRef.current || isPrintingCaptainRef.current || isAnyPrinting) return;
+    isPrintingReceiptRef.current = true;
     setIsPrintingReceipt(true);
     setMessage("");
     try {
@@ -46,12 +53,14 @@ export default function PrintTriggerModal({
       console.error("Print receipt error:", err);
       setMessage(`Gagal mencetak struk: ${err.message || "Error"}`);
     } finally {
+      isPrintingReceiptRef.current = false;
       setIsPrintingReceipt(false);
     }
   };
 
   const handleCaptainClick = async () => {
-    if (!onPrintCaptainOrder || isPrintingCaptain) return;
+    if (!onPrintCaptainOrder || isPrintingReceiptRef.current || isPrintingCaptainRef.current || isAnyPrinting) return;
+    isPrintingCaptainRef.current = true;
     setIsPrintingCaptain(true);
     setMessage("");
     try {
@@ -63,6 +72,7 @@ export default function PrintTriggerModal({
       console.error("Print captain order error:", err);
       setMessage(`Gagal mencetak captain order: ${err.message || "Error"}`);
     } finally {
+      isPrintingCaptainRef.current = false;
       setIsPrintingCaptain(false);
     }
   };
@@ -108,11 +118,25 @@ export default function PrintTriggerModal({
             <button
               type="button"
               onClick={handleReceiptClick}
-              disabled={isPrintingReceipt}
-              className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-md shadow-blue-200 dark:shadow-none flex items-center justify-center space-x-2 text-sm cursor-pointer"
+              disabled={isAnyPrinting}
+              className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all shadow-md shadow-blue-200 dark:shadow-none flex items-center justify-center space-x-2 text-sm cursor-pointer"
             >
-              {receiptPrinted ? <Check size={18} /> : <Printer size={18} className={isPrintingReceipt ? "animate-spin" : ""} />}
-              <span>{isPrintingReceipt ? "Printing..." : receiptPrinted ? "Print receipt (Printed ✓)" : "Print receipt"}</span>
+              {isPrintingReceipt ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" />
+                  <span>Mencetak Struk...</span>
+                </>
+              ) : receiptPrinted ? (
+                <>
+                  <Check size={18} />
+                  <span>Print receipt (Printed ✓)</span>
+                </>
+              ) : (
+                <>
+                  <Printer size={18} />
+                  <span>Print receipt</span>
+                </>
+              )}
             </button>
           )}
 
@@ -120,26 +144,37 @@ export default function PrintTriggerModal({
           <button
             type="button"
             onClick={handleCaptainClick}
-            disabled={isPrintingCaptain}
-            className="w-full py-3.5 px-4 bg-[#4F46E5] hover:bg-[#4338CA] active:bg-[#3730A3] disabled:opacity-50 text-white font-bold rounded-xl transition-all shadow-md shadow-indigo-200 dark:shadow-none flex items-center justify-center space-x-2 text-sm cursor-pointer"
+            disabled={isAnyPrinting}
+            className="w-full py-3.5 px-4 bg-[#4F46E5] hover:bg-[#4338CA] active:bg-[#3730A3] disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all shadow-md shadow-indigo-200 dark:shadow-none flex items-center justify-center space-x-2 text-sm cursor-pointer"
           >
-            {captainPrinted ? <Check size={18} /> : <ChefHat size={18} className={isPrintingCaptain ? "animate-spin" : ""} />}
-            <span>
-              {isPrintingCaptain
-                ? "Printing..."
-                : captainPrinted
-                ? "Print captain order (Printed ✓)"
-                : isAdditional && addedCount > 0
-                ? `Print captain order (${addedCount} tambahan)`
-                : "Print captain order"}
-            </span>
+            {isPrintingCaptain ? (
+              <>
+                <Loader2 size={18} className="animate-spin" />
+                <span>Mencetak Captain Order...</span>
+              </>
+            ) : captainPrinted ? (
+              <>
+                <Check size={18} />
+                <span>Print captain order (Printed ✓)</span>
+              </>
+            ) : (
+              <>
+                <ChefHat size={18} />
+                <span>
+                  {isAdditional && addedCount > 0
+                    ? `Print captain order (${addedCount} tambahan)`
+                    : "Print captain order"}
+                </span>
+              </>
+            )}
           </button>
 
           {/* Button 3: Close */}
           <button
             type="button"
             onClick={onClose}
-            className="w-full py-3.5 px-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-semibold rounded-xl transition-all text-sm cursor-pointer"
+            disabled={isAnyPrinting}
+            className="w-full py-3.5 px-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-gray-700 dark:text-gray-200 font-semibold rounded-xl transition-all text-sm cursor-pointer"
           >
             Close
           </button>
