@@ -33,14 +33,32 @@ export const normalizeCategory = (cat) => {
 };
 
 export const fetchSettlementData = async (supabase, dateStr, categoryFilter = "ALL", storeProfile = null) => {
-  const start = moment.tz(`${dateStr}T00:00:00.000`, TIMEZONE).toISOString();
-  const end = moment.tz(`${dateStr}T23:59:59.999`, TIMEZONE).toISOString();
+  // Robust date normalization: supports YYYY-MM-DD, DD/MM/YYYY, single day number "14", etc.
+  let cleanDateStr = typeof dateStr === "string" ? dateStr.trim() : "";
+  let mDate = moment.tz(cleanDateStr, ["YYYY-MM-DD", "DD/MM/YYYY", "DD-MM-YYYY", "YYYY/MM/DD", moment.ISO_8601], TIMEZONE);
+  if (!mDate.isValid()) {
+    if (/^\d{1,2}$/.test(cleanDateStr)) {
+      const day = parseInt(cleanDateStr, 10);
+      mDate = moment().tz(TIMEZONE).date(day);
+    }
+    if (!mDate.isValid()) {
+      mDate = moment().tz(TIMEZONE);
+    }
+  }
+  const normalizedDateStr = mDate.format("YYYY-MM-DD");
+
+  // Query window with 14-hour buffer before and after to safely capture transactions whether
+  // stored as UTC timestamp or local formatted timestamp, without missing boundary transactions.
+  const queryStart = moment.tz(`${normalizedDateStr}T00:00:00.000`, TIMEZONE).subtract(14, "hours").toISOString();
+  const queryEnd = moment.tz(`${normalizedDateStr}T23:59:59.999`, TIMEZONE).add(14, "hours").toISOString();
 
   // 1. Fetch menu mapping
   const { data: menuData, error: menuErr } = await supabase
     .from("menu")
     .select("menu_id, name, category, price");
-  if (menuErr) throw menuErr;
+  if (menuErr) {
+    console.error("Error fetching menu mapping in settlement:", menuErr);
+  }
 
   const menuMap = {};
   const menuNameMap = {};
@@ -50,18 +68,18 @@ export const fetchSettlementData = async (supabase, dateStr, categoryFilter = "A
   });
 
   const isItemCourt = (item, cleanName) => {
-    const m = menuMap[item.menu_id];
+    const m = menuMap[item?.menu_id];
     if (m?.category && m.category.toLowerCase() === "court") return true;
-    const name = (cleanName || item.menu_name || "").toLowerCase();
+    const name = (cleanName || item?.menu_name || "").toLowerCase();
     if (name.includes("court") || name.includes("lapangan") || name.includes("padel")) return true;
     return false;
   };
 
   const getItemCategory = (item, cleanName) => {
-    const m = menuMap[item.menu_id];
+    const m = menuMap[item?.menu_id];
     let cat = m?.category;
     if (!cat || cat === "Unknown") {
-      const byName = menuNameMap[cleanName.trim().toLowerCase()];
+      const byName = menuNameMap[(cleanName || "").trim().toLowerCase()];
       if (byName?.category) cat = byName.category;
     }
     if (!cat || cat === "Unknown") {
@@ -74,28 +92,87 @@ export const fetchSettlementData = async (supabase, dateStr, categoryFilter = "A
     return normalizeCategory(cat);
   };
 
-  // 2. Fetch transactions for selected business date
-  const { data: txs, error: txErr } = await supabase
+  // 2. Fetch transactions for selected business date (including refunds, excluding VOID)
+  const { data: rawTxs, error: txErr } = await supabase
     .from("transactions")
     .select("*, transaction_items(*)")
-    .gte("date", start)
-    .lte("date", end)
-    .not("status", "eq", "REFUND")
+    .gte("date", queryStart)
+    .lte("date", queryEnd)
     .not("status", "eq", "VOID")
     .order("date", { ascending: true });
 
   if (txErr) throw txErr;
 
+  // Filter precisely for target business date in Asia/Jakarta
+  const txs = (rawTxs || []).filter(t => {
+    if (!t || !t.date) return false;
+    const dateInJakarta = moment.tz(t.date, TIMEZONE).format("YYYY-MM-DD");
+    const rawPrefix = String(t.date).slice(0, 10);
+    return dateInJakarta === normalizedDateStr || rawPrefix === normalizedDateStr;
+  });
+
   const itemAgg = {};
   const promoAgg = {};
   const pmAgg = {};
+  const refundAgg = {};
   let totalDiscount = 0;
   let grandTotal = 0;
   let matchedTxCount = 0;
 
   (txs || []).forEach(t => {
+    const isRefundTx = t.status === "REFUND";
+
+    // 1. Process Refund items (both from full refunds and partial refunds in notes)
+    let refundedItems = [];
+    if (t.notes) {
+      try {
+        const parsed = JSON.parse(t.notes);
+        if (parsed && Array.isArray(parsed.refundedItems)) {
+          refundedItems = parsed.refundedItems;
+        }
+      } catch (e) {}
+    }
+
+    if (isRefundTx && refundedItems.length === 0) {
+      if (t.transaction_items && t.transaction_items.length > 0) {
+        refundedItems = t.transaction_items.map(ti => ({
+          menu_name: ti.menu_name || "Refund",
+          qty: ti.qty || 1,
+          subtotal: ti.subtotal || 0
+        }));
+      } else {
+        refundedItems = [{
+          menu_name: "Refund #" + (t.transaction_id || ""),
+          qty: 1,
+          subtotal: Number(t.cash_amount || t.subtotal || t.total_price || 0)
+        }];
+      }
+    }
+
+    if (refundedItems.length > 0) {
+      refundedItems.forEach(ri => {
+        let rName = ri.menu_name || "Refund";
+        if (rName.includes(" [")) rName = rName.split(" [")[0];
+        if (rName.includes(" (Note:")) rName = rName.split(" (Note:")[0];
+
+        const rCat = getItemCategory(ri, rName);
+        if (categoryFilter === "COURT" && rCat !== "Court") return;
+        if (categoryFilter === "CAFE" && rCat === "Court") return;
+
+        const rKey = `${rCat}___${rName}`;
+        if (!refundAgg[rKey]) {
+          refundAgg[rKey] = { name: rName, category: rCat, qty: 0, total: 0 };
+        }
+        refundAgg[rKey].qty += Number(ri.qty || 1);
+        refundAgg[rKey].total += Number(ri.subtotal || 0);
+      });
+    }
+
+    // If transaction is fully refunded, do not include in active sales
+    if (isRefundTx) return;
+
     const hasCourtItem = t.transaction_items?.some(i => {
-      let clean = i.menu_name || "";
+      let clean = i?.menu_name || "";
       if (clean.includes(" [")) clean = clean.split(" [")[0];
       if (clean.includes(" (Note:")) clean = clean.split(" (Note:")[0];
       return isItemCourt(i, clean);
@@ -233,6 +310,10 @@ export const fetchSettlementData = async (supabase, dateStr, categoryFilter = "A
   const totalPromoQty = promos.reduce((sum, p) => sum + p.qty, 0);
   const totalPromoDiscount = promos.reduce((sum, p) => sum + p.discount, 0);
 
+  const refunds = Object.values(refundAgg).sort((a, b) => b.total - a.total || b.qty - a.qty);
+  const totalRefundQty = refunds.reduce((sum, r) => sum + r.qty, 0);
+  const totalRefundAmount = refunds.reduce((sum, r) => sum + r.total, 0);
+
   const paymentMethods = Object.values(pmAgg).sort((a, b) => b.total - a.total);
   const totalPaymentsQty = paymentMethods.reduce((sum, pm) => sum + pm.qty, 0);
   const totalPaymentsAmount = paymentMethods.reduce((sum, pm) => sum + pm.total, 0);
@@ -241,11 +322,13 @@ export const fetchSettlementData = async (supabase, dateStr, categoryFilter = "A
   if (categoryFilter === "CAFE") categoryHeader = "CAFE";
   if (categoryFilter === "COURT") categoryHeader = "COURT";
 
-  const formattedDate = moment(dateStr).format("DD/MM/YYYY");
+  const formattedDate = mDate.format("DD/MM/YYYY");
+
+  const grossTransactions = itemsSubtotal + totalRefundAmount;
 
   return {
     storeProfile: storeProfile || { store_name: "ADA PADEL & COFFEE SHOP", address: "BSD City, Tangerang" },
-    date: dateStr,
+    date: normalizedDateStr,
     formattedDate,
     categoryFilter,
     categoryHeader,
@@ -257,11 +340,14 @@ export const fetchSettlementData = async (supabase, dateStr, categoryFilter = "A
     promos,
     totalPromoQty,
     totalPromoDiscount,
+    refunds,
+    totalRefundQty,
+    totalRefundAmount,
     paymentMethods,
     totalPaymentsQty,
     totalPaymentsAmount,
-    totalTransactions: itemsSubtotal,
+    totalTransactions: grossTransactions,
     totalDiscount,
-    grandTotal: itemsSubtotal - totalDiscount
+    grandTotal: grossTransactions - totalDiscount - totalRefundAmount
   };
 };

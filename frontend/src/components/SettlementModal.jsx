@@ -3,6 +3,7 @@ import { X, Printer, Calendar, RefreshCw, Bluetooth, Check, AlertCircle, FileTex
 import moment from "moment-timezone";
 import { supabase } from "../lib/supabase";
 import { formatSettlementReceiptEscPos, printThermalReceiptIframe, printViaBluetooth, isBluetoothConnected, getCachedBluetoothDevice } from "../utils/printer";
+import { fetchSettlementData } from "../utils/settlement";
 
 const TIMEZONE = "Asia/Jakarta";
 
@@ -59,272 +60,8 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
     setError(null);
     setBluetoothStatus("");
     try {
-      const start = moment.tz(`${dateStr}T00:00:00.000`, TIMEZONE).toISOString();
-      const end = moment.tz(`${dateStr}T23:59:59.999`, TIMEZONE).toISOString();
-
-      // 1. Fetch menu mapping
-      const { data: menuData, error: menuErr } = await supabase
-        .from("menu")
-        .select("menu_id, name, category, price");
-      if (menuErr) throw menuErr;
-
-      const menuMap = {};
-      const menuNameMap = {};
-      (menuData || []).forEach(m => {
-        menuMap[m.menu_id] = m;
-        if (m.name) menuNameMap[m.name.trim().toLowerCase()] = m;
-      });
-
-      // Helper to check if item is Court related
-      const isItemCourt = (item, cleanName) => {
-        const m = menuMap[item.menu_id];
-        if (m?.category && m.category.toLowerCase() === "court") return true;
-        const name = (cleanName || item.menu_name || "").toLowerCase();
-        if (name.includes("court") || name.includes("lapangan") || name.includes("padel")) return true;
-        return false;
-      };
-
-      // Helper to normalize category name
-      const normalizeCategory = (cat) => {
-        if (!cat) return "Other";
-        const trimmed = cat.trim();
-        const lower = trimmed.toLowerCase();
-        if (lower === "coffee") return "Coffee";
-        if (lower === "non-coffee" || lower === "non coffee" || lower === "noncoffee") return "Non-Coffee";
-        if (lower === "food" || lower === "foods") return "Food";
-        if (lower === "beverage" || lower === "beverages" || lower === "drink" || lower === "drinks") return "Beverage";
-        if (lower === "snack" || lower === "snacks") return "Snack";
-        if (lower === "add-ons" || lower === "add-on" || lower === "addons" || lower === "addon") return "Add-Ons";
-        if (lower === "court" || lower === "lapangan") return "Court";
-        return trimmed.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
-      };
-
-      const getItemCategory = (item, cleanName) => {
-        const m = menuMap[item.menu_id];
-        let cat = m?.category;
-        if (!cat || cat === "Unknown") {
-          const byName = menuNameMap[cleanName.trim().toLowerCase()];
-          if (byName?.category) cat = byName.category;
-        }
-        if (!cat || cat === "Unknown") {
-          if (isItemCourt(item, cleanName)) {
-            cat = "Court";
-          } else {
-            cat = "Other";
-          }
-        }
-        return normalizeCategory(cat);
-      };
-
-      // 2. Fetch transactions for date
-      const { data: txs, error: txErr } = await supabase
-        .from("transactions")
-        .select("*, transaction_items(*)")
-        .gte("date", start)
-        .lte("date", end)
-        .not("status", "eq", "REFUND")
-        .not("status", "eq", "VOID")
-        .order("date", { ascending: true });
-
-      if (txErr) throw txErr;
-
-      // 3. Process transactions
-      const itemAgg = {};
-      const promoAgg = {};
-      const pmAgg = {};
-      let totalDiscount = 0;
-      let grandTotal = 0;
-      let matchedTxCount = 0;
-
-      (txs || []).forEach(t => {
-        // Determine whether transaction matches categoryFilter
-        const hasCourtItem = t.transaction_items?.some(i => {
-          let clean = i.menu_name || "";
-          if (clean.includes(" [")) clean = clean.split(" [")[0];
-          if (clean.includes(" (Note:")) clean = clean.split(" (Note:")[0];
-          return isItemCourt(i, clean);
-        });
-        const isCourtTx = t.table_no === "Court" || hasCourtItem;
-
-        if (categoryFilter === "COURT" && !isCourtTx) return;
-        if (categoryFilter === "CAFE" && isCourtTx) return;
-
-        matchedTxCount += 1;
-        grandTotal += Number(t.total_price || 0);
-        totalDiscount += Number(t.discount || 0);
-
-        // Promos / Discounts
-        if (Number(t.discount) > 0) {
-          let pName = "Diskon / Promo";
-          if (t.notes) {
-            try {
-              const parsed = JSON.parse(t.notes);
-              if (parsed && parsed.promo_name) pName = parsed.promo_name;
-            } catch (e) {}
-          } else if (t.payment_method === "Staff Beverage") {
-            pName = "Staff Beverage";
-          }
-          if (!promoAgg[pName]) promoAgg[pName] = { name: pName, qty: 0, discount: 0 };
-          promoAgg[pName].qty += 1;
-          promoAgg[pName].discount += Number(t.discount);
-        }
-
-        // Payment Methods
-        const rawPm = t.payment_method || "Other";
-        if (rawPm.includes(" (Rp ")) {
-          const parts = rawPm.split(", ");
-          parts.forEach(part => {
-            const match = part.match(/^(.*?)\s*\(Rp\s*([\d\.,]+)\)$/);
-            if (match) {
-              const name = match[1].trim();
-              const amt = Number(match[2].replace(/\./g, "")) || 0;
-              if (!pmAgg[name]) pmAgg[name] = { name, qty: 0, total: 0 };
-              pmAgg[name].qty += 1;
-              pmAgg[name].total += amt;
-            } else {
-              const name = part.split(" (Rp ")[0].trim();
-              if (!pmAgg[name]) pmAgg[name] = { name, qty: 0, total: 0 };
-              pmAgg[name].qty += 1;
-              pmAgg[name].total += Number(t.total_price);
-            }
-          });
-        } else {
-          if (!pmAgg[rawPm]) pmAgg[rawPm] = { name: rawPm, qty: 0, total: 0 };
-          pmAgg[rawPm].qty += 1;
-          pmAgg[rawPm].total += Number(t.total_price);
-        }
-
-        // Items sold
-        if (t.transaction_items) {
-          t.transaction_items.forEach(item => {
-            let cleanName = item.menu_name || "";
-            if (cleanName.includes(" [")) cleanName = cleanName.split(" [")[0];
-            if (cleanName.includes(" (Note:")) cleanName = cleanName.split(" (Note:")[0];
-            
-            const itemCategory = getItemCategory(item, cleanName);
-
-            if (categoryFilter === "COURT" && itemCategory !== "Court") return;
-            if (categoryFilter === "CAFE" && itemCategory === "Court") return;
-
-            let parsedAddons = [];
-            if (typeof item.addons === "string") {
-              try { parsedAddons = JSON.parse(item.addons); } catch (e) {}
-            } else {
-              parsedAddons = item.addons || [];
-            }
-
-            let itemAddonsTotal = 0;
-            if (parsedAddons && Array.isArray(parsedAddons)) {
-              parsedAddons.forEach(addon => {
-                const addonRev = Number(addon.price) * Number(item.qty);
-                itemAddonsTotal += addonRev;
-                if (categoryFilter === "ALL" || categoryFilter === "CAFE") {
-                  const aKey = `Add-Ons___${addon.name}`;
-                  if (!itemAgg[aKey]) {
-                    itemAgg[aKey] = { name: addon.name, category: "Add-Ons", qty: 0, total: 0 };
-                  }
-                  itemAgg[aKey].qty += Number(item.qty);
-                  itemAgg[aKey].total += addonRev;
-                }
-              });
-            }
-
-            const baseTotal = Number(item.subtotal) - itemAddonsTotal;
-            const itemKey = `${itemCategory}___${cleanName}`;
-            if (!itemAgg[itemKey]) {
-              itemAgg[itemKey] = { name: cleanName, category: itemCategory, qty: 0, total: 0 };
-            }
-            itemAgg[itemKey].qty += Number(item.qty);
-            itemAgg[itemKey].total += baseTotal;
-          });
-        }
-      });
-
-      const allAggregatedItems = Object.values(itemAgg);
-
-      // Group items by category
-      const groupsMap = {};
-      allAggregatedItems.forEach(item => {
-        const cat = item.category || "Other";
-        if (!groupsMap[cat]) {
-          groupsMap[cat] = {
-            category: cat,
-            items: [],
-            totalQty: 0,
-            subtotal: 0
-          };
-        }
-        groupsMap[cat].items.push(item);
-        groupsMap[cat].totalQty += item.qty;
-        groupsMap[cat].subtotal += item.total;
-      });
-
-      const CANONICAL_ORDER = [
-        "Coffee",
-        "Non-Coffee",
-        "Food",
-        "Beverage",
-        "Snack",
-        "Add-Ons",
-        "Court",
-        "Other"
-      ];
-
-      const getCategoryRank = (cat) => {
-        const idx = CANONICAL_ORDER.findIndex(c => c.toLowerCase() === cat.toLowerCase());
-        return idx !== -1 ? idx : 50;
-      };
-
-      const categoryGroups = Object.values(groupsMap).sort((a, b) => {
-        const rankA = getCategoryRank(a.category);
-        const rankB = getCategoryRank(b.category);
-        if (rankA !== rankB) return rankA - rankB;
-        return a.category.localeCompare(b.category);
-      });
-
-      categoryGroups.forEach(group => {
-        group.items.sort((a, b) => b.qty - a.qty || b.total - a.total || a.name.localeCompare(b.name));
-      });
-
-      const items = categoryGroups.flatMap(g => g.items);
-      const itemsSubtotal = categoryGroups.reduce((sum, g) => sum + g.subtotal, 0);
-      const itemsTotalQty = categoryGroups.reduce((sum, g) => sum + g.totalQty, 0);
-
-      const promos = Object.values(promoAgg);
-      const totalPromoQty = promos.reduce((sum, p) => sum + p.qty, 0);
-      const totalPromoDiscount = promos.reduce((sum, p) => sum + p.discount, 0);
-
-      const paymentMethods = Object.values(pmAgg).sort((a, b) => b.total - a.total);
-      const totalPaymentsQty = paymentMethods.reduce((sum, pm) => sum + pm.qty, 0);
-      const totalPaymentsAmount = paymentMethods.reduce((sum, pm) => sum + pm.total, 0);
-
-      let categoryHeader = "CAFE & COURT";
-      if (categoryFilter === "CAFE") categoryHeader = "CAFE";
-      if (categoryFilter === "COURT") categoryHeader = "COURT";
-
-      const formattedDate = moment(dateStr).format("DD/MM/YYYY");
-
-      setSettlementData({
-        storeProfile: storeProfile || { store_name: "ADA Padel & Coffee", address: "BSD City, Tangerang" },
-        date: dateStr,
-        formattedDate,
-        categoryFilter,
-        categoryHeader,
-        matchedTxCount,
-        categoryGroups,
-        items,
-        itemsSubtotal,
-        itemsTotalQty,
-        promos,
-        totalPromoQty,
-        totalPromoDiscount,
-        paymentMethods,
-        totalPaymentsQty,
-        totalPaymentsAmount,
-        totalTransactions: itemsSubtotal,
-        totalDiscount,
-        grandTotal: itemsSubtotal - totalDiscount
-      });
+      const data = await fetchSettlementData(supabase, dateStr, categoryFilter, storeProfile);
+      setSettlementData(data);
     } catch (err) {
       console.error("Error loading settlement data:", err);
       setError("Gagal mengambil data settlement: " + (err.message || "Unknown error"));
@@ -341,19 +78,19 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
     const hasBluetooth = isBluetoothConnected() || (hardwareType === "bluetooth");
 
     if (hasBluetooth) {
-    setBluetoothStatus("Menghubungkan ke printer bluetooth...");
-    try {
-      const escPosText = formatSettlementReceiptEscPos(settlementData, {
+      setBluetoothStatus("Menghubungkan ke printer bluetooth...");
+      try {
+        const escPosText = formatSettlementReceiptEscPos(settlementData, {
           paperSize,
           compactFont: false
         });
-      await printViaBluetooth(escPosText);
-      setBluetoothStatus("Berhasil dicetak via Bluetooth!");
-      detectHardware();
-      setTimeout(() => setBluetoothStatus(""), 4000);
-    } catch (err) {
-      console.error("Bluetooth print failed:", err);
-       // Fallback otomatis ke dialog browser jika bluetooth gagal
+        await printViaBluetooth(escPosText);
+        setBluetoothStatus("Berhasil dicetak via Bluetooth!");
+        detectHardware();
+        setTimeout(() => setBluetoothStatus(""), 4000);
+      } catch (err) {
+        console.error("Bluetooth print failed:", err);
+        // Fallback otomatis ke dialog browser jika bluetooth gagal
         setBluetoothStatus("Bluetooth gagal, mencetak via printer browser...");
         if (receiptRef.current) {
           printThermalReceiptIframe(receiptRef.current.innerHTML, { paperSize, fontSize });
@@ -430,8 +167,8 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
               <Printer size={22} />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Print End Of Day Report</h2>
-              <p className="text-xs text-gray-500">Daily sales summary, promo discounts & payment reports</p>
+              <h2 className="text-xl font-bold text-gray-900">Print Settlement / Rekonsiliasi</h2>
+              <p className="text-xs text-gray-500">Laporan rekapitulasi harian penjualan, potongan promo & pembayaran</p>
             </div>
           </div>
           <button
@@ -450,7 +187,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-xl border border-gray-300 shadow-sm">
                 <Calendar size={16} className="text-gray-500" />
-                <span className="text-xs font-semibold text-gray-500">Date:</span>
+                <span className="text-xs font-semibold text-gray-500">Tanggal:</span>
                 <input
                   type="date"
                   value={selectedDate}
@@ -469,7 +206,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
                     : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
                 }`}
               >
-                Today
+                Hari Ini
               </button>
               <button
                 type="button"
@@ -480,23 +217,23 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
                     : "bg-white text-gray-700 border-gray-300 hover:bg-gray-100"
                 }`}
               >
-                Yesterday
+                Kemarin
               </button>
 
               {/* Category Filter */}
               <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-xl border border-gray-300 shadow-sm">
-                <span className="text-xs font-semibold text-gray-500">Type Order:</span>
+                <span className="text-xs font-semibold text-gray-500">Kategori:</span>
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
                   className="text-xs sm:text-sm font-medium text-gray-800 bg-transparent outline-none cursor-pointer"
                 >
-                  <option value="ALL">All (Cafe & Court)</option>
-                  <option value="CAFE">Cafe Only</option>
-                  <option value="COURT">Court Only</option>
+                  <option value="ALL">Semua (Cafe & Court)</option>
+                  <option value="CAFE">Cafe Saja</option>
+                  <option value="COURT">Court Saja</option>
                 </select>
               </div>
-              
+
               {/* Paper Size selector */}
               <div className="flex items-center space-x-2 bg-white px-3 py-1.5 rounded-xl border border-gray-300 shadow-sm">
                 <span className="text-xs font-semibold text-gray-500">Kertas:</span>
@@ -543,15 +280,15 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
                 <span className={`inline-block w-2 h-2 rounded-full ${hardwareType === "bluetooth" ? "bg-emerald-500 animate-pulse" : "bg-blue-500"}`}></span>
                 <span className="font-medium">Hardware: <strong>{hardwareName}</strong></span>
                 {typeof navigator !== "undefined" && navigator.bluetooth && (
-              <button
-                type="button"
-                onClick={handleToggleHardware}
+                  <button
+                    type="button"
+                    onClick={handleToggleHardware}
                     className="text-emerald-700 hover:text-emerald-800 hover:underline text-[11px] font-semibold ml-1 cursor-pointer"
                     title={hardwareType === "bluetooth" ? "Beralih ke printer sistem / browser" : "Hubungkan printer bluetooth"}
                   >
-                    ({hardwareType === "bluetooth" ? "Change to Browser" : "Change to Bluetooth"})
-              </button>
-              )}
+                    ({hardwareType === "bluetooth" ? "Ganti ke Browser" : "Ganti ke Bluetooth"})
+                  </button>
+                )}
               </div>
 
               <button
@@ -577,7 +314,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
                 </span>
               ) : settlementData ? (
                 <span className="text-gray-600">
-                  Found <strong>{settlementData.matchedTxCount}</strong> completed transactions for this category.
+                  Ditemukan <strong>{settlementData.matchedTxCount}</strong> transaksi selesai untuk kategori ini.
                 </span>
               ) : null}
             </div>
@@ -597,7 +334,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
               <span>{error}</span>
             </div>
           ) : settlementData ? (
-             /* Thermal Receipt Container (Matches uploaded image & prevents thermal cutoffs) */
+            /* Thermal Receipt Container (Matches uploaded image & prevents thermal cutoffs) */
             <div
               ref={receiptRef}
               id="settlement-receipt-print"
@@ -655,40 +392,40 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
                       {/* Sub-Header Jenis Menu (e.g. [COFFEE], [NON-COFFEE], [FOOD], [COURT]) */}
                       <div className="font-bold uppercase text-black text-[11px] sm:text-xs mb-1">
                         [ {group.category} ]
-                </div>
-                
-                <table className="w-full text-left border-collapse" style={{ tableLayout: "fixed" }}>
+                      </div>
+
+                      <table className="w-full text-left border-collapse" style={{ tableLayout: "fixed" }}>
                         <colgroup>
                           <col style={{ width: "48%" }} />
                           <col style={{ width: "18%" }} />
                           <col style={{ width: "34%" }} />
                         </colgroup>
-                  <thead>
-                    <tr className="border-b border-dashed border-gray-400 text-gray-700">
-                        <th className="py-0.5 font-semibold text-gray-800 text-left">Menu</th>
-                        <th className="py-0.5 font-semibold text-center">Qty</th>
-                        <th className="py-0.5 font-semibold text-right">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.items.map((item, idx) => (
-                        <tr key={idx} className="border-b border-gray-100/60">
-                            <td className="py-0.5 pr-1 align-top text-gray-900 break-words">{item.name}</td>
-                            <td className="py-0.5 text-center align-top text-gray-800">{item.qty}</td>
-                            <td className="py-0.5 text-right align-top whitespace-nowrap text-gray-900">
-                            {formatCurrency(item.total)}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                  <tfoot>
+                        <thead>
+                          <tr className="border-b border-dashed border-gray-400 text-gray-700">
+                            <th className="py-0.5 font-semibold text-gray-800 text-left">Menu</th>
+                            <th className="py-0.5 font-semibold text-center">Qty</th>
+                            <th className="py-0.5 font-semibold text-right">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.items.map((item, idx) => (
+                            <tr key={idx} className="border-b border-gray-100/60">
+                              <td className="py-0.5 pr-1 align-top text-gray-900 break-words">{item.name}</td>
+                              <td className="py-0.5 text-center align-top text-gray-800">{item.qty}</td>
+                              <td className="py-0.5 text-right align-top whitespace-nowrap text-gray-900">
+                                {formatCurrency(item.total)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
                           <tr className="border-t border-dotted border-gray-400 font-semibold text-gray-800">
                             <td className="pt-1 text-left break-words">Subtotal {group.category}</td>
                             <td className="pt-1 text-center">{group.totalQty}</td>
                             <td className="pt-1 text-right whitespace-nowrap">{formatCurrency(group.subtotal)}</td>
                           </tr>
                         </tfoot>
-                </table>
+                      </table>
                     </div>
                   ))
                 ) : (
@@ -768,7 +505,58 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
               {/* Single Divider */}
               <div className="border-t border-dashed border-gray-900 my-2.5"></div>
 
-              {/* SECTION 3: PAYMENT METHOD */}
+              {/* SECTION 3: REFUND */}
+              <div className="my-2">
+                <div className="font-bold uppercase text-black text-xs sm:text-sm mb-1.5">
+                  REFUND
+                </div>
+
+                <table className="w-full text-left border-collapse" style={{ tableLayout: "fixed" }}>
+                  <colgroup>
+                    <col style={{ width: "48%" }} />
+                    <col style={{ width: "18%" }} />
+                    <col style={{ width: "34%" }} />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b border-dashed border-gray-400">
+                      <th className="py-0.5 font-semibold text-gray-800 text-left">Menu</th>
+                      <th className="py-0.5 font-semibold text-center">Qty</th>
+                      <th className="py-0.5 font-semibold text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {settlementData.refunds && settlementData.refunds.length > 0 ? (
+                      settlementData.refunds.map((r, idx) => (
+                        <tr key={idx} className="border-b border-gray-100/60">
+                          <td className="py-0.5 pr-1 align-top text-gray-900 break-words">{r.name}</td>
+                          <td className="py-0.5 text-center align-top text-gray-800">{r.qty}</td>
+                          <td className="py-0.5 text-right align-top whitespace-nowrap text-gray-900">
+                            {formatCurrency(r.total)}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="py-0.5 text-gray-500">-</td>
+                        <td className="py-0.5 text-center text-gray-500">0</td>
+                        <td className="py-0.5 text-right text-gray-500">{formatCurrency(0)}</td>
+                      </tr>
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-dashed border-gray-900 font-bold text-black">
+                      <td className="pt-1.5 text-left break-words">Total Refund</td>
+                      <td className="pt-1.5 text-center">{settlementData.totalRefundQty || 0}</td>
+                      <td className="pt-1.5 text-right whitespace-nowrap">{formatCurrency(settlementData.totalRefundAmount || 0)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              {/* Single Divider */}
+              <div className="border-t border-dashed border-gray-900 my-2.5"></div>
+
+              {/* SECTION 4: PAYMENT METHOD */}
               <div className="my-2">
                 <div className="font-bold uppercase text-black text-xs sm:text-sm mb-1.5">
                   PAYMENT METHOD
@@ -819,7 +607,7 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
               {/* Single Divider */}
               <div className="border-t border-dashed border-gray-900 my-2.5"></div>
 
-              {/* SECTION 4: TOTAL KESELURUHAN */}
+              {/* SECTION 5: TOTAL KESELURUHAN */}
               <div className="my-2 space-y-1">
                 <div className="font-bold uppercase text-black text-xs sm:text-sm mb-1.5">
                   TOTAL KESELURUHAN
@@ -834,6 +622,13 @@ export default function SettlementModal({ isOpen, onClose, storeProfile: initial
                   <span className="text-gray-800">Total Discount</span>
                   <span className="font-medium whitespace-nowrap">-{formatCurrency(settlementData.totalDiscount)}</span>
                 </div>
+
+                {(settlementData.totalRefundAmount || 0) > 0 && (
+                  <div className="flex justify-between py-0.5 text-red-600">
+                    <span>Total Refund</span>
+                    <span className="font-medium whitespace-nowrap">-{formatCurrency(settlementData.totalRefundAmount)}</span>
+                  </div>
+                )}
 
                 <div className="border-t border-dashed border-gray-900 my-1.5 pt-1.5 flex justify-between font-bold text-xs sm:text-sm text-black">
                   <span>Grand Total</span>

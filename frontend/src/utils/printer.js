@@ -454,7 +454,27 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
   text += '\x1B\x45\x00';
   text += "\n";
 
-  // Section 3: PAYMENT METHOD
+  // Section 3: REFUND
+  text += '\x1B\x45\x01';
+  text += "REFUND\n";
+  text += '\x1B\x45\x00';
+  text += padRight("Menu", colName) + " " + padLeft("Qty", colQty) + " " + padLeft("Total", colPrice) + "\n";
+  
+  if (settlementData.refunds && settlementData.refunds.length > 0) {
+    settlementData.refunds.forEach(r => {
+      text += formatTableRow(r.name, r.qty, r.total);
+    });
+  } else {
+    text += formatTableRow("-", 0, 0);
+  }
+
+  text += "-".repeat(WIDTH) + "\n";
+  text += '\x1B\x45\x01';
+  text += formatTableRow("Tot Refund", settlementData.totalRefundQty || 0, settlementData.totalRefundAmount || 0);
+  text += '\x1B\x45\x00';
+  text += "\n";
+
+  // Section 4: PAYMENT METHOD
   text += '\x1B\x45\x01';
   text += "PAYMENT METHOD\n";
   text += '\x1B\x45\x00';
@@ -474,17 +494,21 @@ export const formatSettlementReceiptEscPos = (settlementData, options = {}) => {
   text += '\x1B\x45\x00';
   text += "\n";
 
-  // Section 4: TOTAL KESELURUHAN
+  // Section 5: TOTAL KESELURUHAN
   text += '\x1B\x45\x01';
   text += "TOTAL KESELURUHAN\n";
   text += '\x1B\x45\x00';
   const txTot = formatCurrency(settlementData.totalTransactions || 0);
   const discTot = formatCurrency(settlementData.totalDiscount || 0);
+  const refTot = formatCurrency(settlementData.totalRefundAmount || 0);
   const grandTot = formatCurrency(settlementData.grandTotal || 0);
 
   const colLabel = WIDTH - 16;
   text += padRight("Total Transaksi", colLabel) + padLeft(txTot, 16) + "\n";
   text += padRight("Total Discount", colLabel) + padLeft("-" + discTot, 16) + "\n";
+  if ((settlementData.totalRefundAmount || 0) > 0) {
+    text += padRight("Total Refund", colLabel) + padLeft("-" + refTot, 16) + "\n";
+  }
   text += "-".repeat(WIDTH) + "\n";
   text += '\x1B\x45\x01';
   text += padRight("Grand Total", colLabel) + padLeft(grandTot, 16) + "\n";
@@ -669,9 +693,9 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
           <div class="font-bold uppercase text-black text-[11px] mb-1">[ ${group.category} ]</div>
           <table class="w-full text-left border-collapse" style="table-layout: fixed;">
             <colgroup>
-              <col style="width: 45%;" />
-              <col style="width: 15%;" />
-              <col style="width: 40%;" />
+              <col style="width: 48%;" />
+              <col style="width: 18%;" />
+              <col style="width: 34%;" />
             </colgroup>
             <thead>
               <tr class="border-b border-dashed border-gray-400">
@@ -707,6 +731,25 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
     `).join("");
   } else {
     promosHtml = `
+      <tr>
+        <td class="py-0.5 text-gray-500">-</td>
+        <td class="py-0.5 text-center text-gray-500">0</td>
+        <td class="py-0.5 text-right text-gray-500">${formatCurrency(0)}</td>
+      </tr>
+    `;
+  }
+
+  let refundsHtml = "";
+  if (settlementData.refunds && settlementData.refunds.length > 0) {
+    refundsHtml = settlementData.refunds.map(r => `
+      <tr class="border-b border-gray-100">
+        <td class="py-0.5 pr-1 align-top break-words">${r.name}</td>
+        <td class="py-0.5 text-center align-top">${r.qty}</td>
+        <td class="py-0.5 text-right align-top whitespace-nowrap">${formatCurrency(r.total)}</td>
+      </tr>
+    `).join("");
+  } else {
+    refundsHtml = `
       <tr>
         <td class="py-0.5 text-gray-500">-</td>
         <td class="py-0.5 text-center text-gray-500">0</td>
@@ -761,9 +804,9 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
         <!-- Total Section 1 -->
         <table class="w-full text-left border-collapse mt-2" style="table-layout: fixed;">
           <colgroup>
-            <col style="width: 45%;" />
-            <col style="width: 15%;" />
-            <col style="width: 40%;" />
+            <col style="width: 48%;" />
+            <col style="width: 18%;" />
+            <col style="width: 34%;" />
           </colgroup>
           <tfoot>
             <tr class="border-t-2 border-dashed border-gray-900 font-bold text-black">
@@ -782,9 +825,9 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
         <div class="font-bold uppercase text-black text-xs mb-1">PROMO</div>
         <table class="w-full text-left border-collapse" style="table-layout: fixed;">
           <colgroup>
-            <col style="width: 45%;" />
-            <col style="width: 15%;" />
-            <col style="width: 40%;" />
+            <col style="width: 48%;" />
+            <col style="width: 18%;" />
+            <col style="width: 34%;" />
           </colgroup>
           <thead>
             <tr class="border-b border-dashed border-gray-400">
@@ -806,14 +849,43 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
 
       <div class="divider-single"></div>
 
-      <!-- Section 3: Payment Method -->
+      <!-- Section 3: Refund -->
+      <div class="my-1.5">
+        <div class="font-bold uppercase text-black text-xs mb-1">REFUND</div>
+        <table class="w-full text-left border-collapse" style="table-layout: fixed;">
+          <colgroup>
+            <col style="width: 48%;" />
+            <col style="width: 18%;" />
+            <col style="width: 34%;" />
+          </colgroup>
+          <thead>
+            <tr class="border-b border-dashed border-gray-400">
+              <th class="py-0.5 font-semibold text-left">Menu</th>
+              <th class="py-0.5 font-semibold text-center">Qty</th>
+              <th class="py-0.5 font-semibold text-right">Total</th>
+            </tr>
+          </thead>
+          <tbody>${refundsHtml}</tbody>
+          <tfoot>
+            <tr class="border-t border-dashed border-gray-900 font-bold text-black">
+              <td class="pt-1 text-left break-words">Total Refund</td>
+              <td class="pt-1 text-center">${settlementData.totalRefundQty || 0}</td>
+              <td class="pt-1 text-right whitespace-nowrap">${formatCurrency(settlementData.totalRefundAmount || 0)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <div class="divider-single"></div>
+
+      <!-- Section 4: Payment Method -->
       <div class="my-1.5">
         <div class="font-bold uppercase text-black text-xs mb-1">PAYMENT METHOD</div>
         <table class="w-full text-left border-collapse" style="table-layout: fixed;">
           <colgroup>
-            <col style="width: 45%;" />
-            <col style="width: 15%;" />
-            <col style="width: 40%;" />
+            <col style="width: 48%;" />
+            <col style="width: 18%;" />
+            <col style="width: 34%;" />
           </colgroup>
           <thead>
             <tr class="border-b border-dashed border-gray-400">
@@ -835,7 +907,7 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
 
       <div class="divider-single"></div>
 
-      <!-- Section 4: Total Keseluruhan -->
+      <!-- Section 5: Total Keseluruhan -->
       <div class="my-1.5 space-y-1">
         <div class="font-bold uppercase text-black text-xs mb-1">TOTAL KESELURUHAN</div>
         <div class="flex justify-between py-0.5">
@@ -846,6 +918,11 @@ export const formatSettlementReceiptHtml = (settlementData, options = {}) => {
           <span>Total Discount</span>
           <span class="font-medium whitespace-nowrap">-${formatCurrency(settlementData.totalDiscount || 0)}</span>
         </div>
+        ${(settlementData.totalRefundAmount || 0) > 0 ? `
+        <div class="flex justify-between py-0.5 text-red-600">
+          <span>Total Refund</span>
+          <span class="font-medium whitespace-nowrap">-${formatCurrency(settlementData.totalRefundAmount || 0)}</span>
+        </div>` : ''}
         <div class="border-t border-dashed border-gray-900 my-1 pt-1 flex justify-between font-bold text-xs text-black">
           <span>Grand Total</span>
           <span class="whitespace-nowrap">${formatCurrency(settlementData.grandTotal || 0)}</span>
@@ -884,8 +961,8 @@ export const printSettlementReceipt = async (settlementData, options = {}) => {
       return { success: true, method: "bluetooth", deviceName: getConnectedPrinterName() };
     } catch (btErr) {
       console.warn("Active Bluetooth print failed, falling back to browser print:", btErr);
-      const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "normal" });
-      printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "normal" });
+      const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
+      printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
       return { success: true, method: "browser", fallbackReason: btErr.message };
     }
   }
@@ -897,15 +974,15 @@ export const printSettlementReceipt = async (settlementData, options = {}) => {
       return { success: true, method: "bluetooth", deviceName: getConnectedPrinterName() };
     } catch (btErr) {
       console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
-      const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "normal" });
-      printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "normal" });
+      const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
+      printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
       return { success: true, method: "browser", fallbackReason: btErr.message };
     }
   }
 
   // 3. Browser Print Dialog Fallback
-  const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "normal" });
-  printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "normal" });
+  const html = formatSettlementReceiptHtml(settlementData, { paperSize, fontSize: options.fontSize || "compact" });
+  printThermalReceiptIframe(html, { paperSize, fontSize: options.fontSize || "compact" });
   return { success: true, method: "browser" };
 };
 
