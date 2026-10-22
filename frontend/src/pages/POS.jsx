@@ -4,7 +4,15 @@ import { clsx } from "clsx";
 import { useLocation } from "react-router-dom";
 import moment from "moment-timezone";
 import { supabase } from "../lib/supabase";
-import { printViaBluetooth, formatReceiptText } from "../utils/printer";
+import {
+  printViaBluetooth,
+  formatReceiptText,
+  printCaptainOrder,
+  printCustomerReceipt,
+  getItemSignature,
+  getConnectedPrinterName
+} from "../utils/printer";
+import PrintTriggerModal from "../components/PrintTriggerModal";
 
 const TIMEZONE = 'Asia/Jakarta';
 
@@ -22,6 +30,9 @@ function POS() {
   const [tableNo, setTableNo] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [openBillId, setOpenBillId] = useState(null);
+  const originalBillItemsRef = useRef([]);
+  const [printModalOpen, setPrintModalOpen] = useState(false);
+  const [printModalConfig, setPrintModalConfig] = useState(null);
   const [selectedMenu, setSelectedMenu] = useState(null);
   const [showOptions, setShowOptions] = useState(false);
   const [qty, setQty] = useState(1);
@@ -63,6 +74,16 @@ function POS() {
         setSelectedPromoId(parts[1]);
       }
       setTableNo(loadTableNo);
+      
+      let loadedCustName = bill.customer_name || "";
+      if (loadedCustName.includes(" - Note: ")) {
+        const parts = loadedCustName.split(" - Note: ");
+        loadedCustName = parts[0];
+        setTransactionNote(parts.slice(1).join(" - Note: "));
+      } else {
+        setTransactionNote("");
+      }
+      setCustomerName(loadedCustName);
       setCustomerName(bill.customer_name);
       setOpenBillId(bill.bill_id);
       
@@ -77,12 +98,38 @@ function POS() {
         } else {
           parsedAddons = item.addons || [];
         }
+        let rawName = item.menu_name || "";
+        let note = item.note || "";
+        const noteMatch = rawName.match(/\(Note: (.*?)\)$/);
+        if (noteMatch) {
+          note = noteMatch[1] || note;
+          rawName = rawName.replace(/\s*\(Note: .*?\)$/, "").trim();
+        }
+        let drinkType = item.drink_type || null;
+        const drinkMatch = rawName.match(/\[(Hot|Ice)\]/);
+        if (drinkMatch) {
+          drinkType = drinkMatch[1];
+          rawName = rawName.replace(/\s*\[(?:Hot|Ice)\]/, "").trim();
+        }
+        let sugarLevel = item.sugar_level || null;
+        const sugarMatch = rawName.match(/\[(.*?) Sugar\]/);
+        if (sugarMatch) {
+          sugarLevel = sugarMatch[1];
+          rawName = rawName.replace(/\s*\[.*? Sugar\]/, "").trim();
+        }
+
         return {
           ...item,
+          menu_name: rawName,
+          drink_type: drinkType,
+          sugar_level: sugarLevel,
+          note: note,
           addons: parsedAddons
         };
       });
       setCart(parsedItems);
+      originalBillItemsRef.current = JSON.parse(JSON.stringify(parsedItems));
+
       if (location.state.action === "close") {
         setShowPayment(true);
       }
@@ -720,19 +767,54 @@ function POS() {
         change_amount: finalChange
       };
 
-      const receiptText = formatReceiptText(storeProfile, txDataConfig, cart, totals);
-      try {
-        await printViaBluetooth(receiptText);
-        alert("Payment & Print successful!");
-      } catch (err) {
-        console.error("Bluetooth print failed:", err);
-        alert("Payment successful! (Bluetooth print failed/cancelled)");
+      const isClosingBill = !!openBillId;
+      if (isClosingBill) {
+        try {
+          localStorage.removeItem('captain_printed_' + openBillId);
+        } catch (e) {}
       }
+
+      let autoReceiptPrinted = false;
+      // User requirement: Saat close bill, otomatis mencetak receipt order struk
+      if (isClosingBill) {
+        try {
+          await printCustomerReceipt(storeProfile, txDataConfig, cart, totals);
+          autoReceiptPrinted = true;
+        } catch (printErr) {
+          console.warn("Auto print receipt on close bill error:", printErr);
+        }
+      }
+
+      // Open print popup trigger modal for choosing what to print
+      setPrintModalConfig({
+        type: "payment",
+        title: isClosingBill ? "Bill closed & paid successfully" : "Payment successful",
+        subtitle: "Choose what to print on your single printer.",
+        orderInfo: {
+          invoice_no: invoiceNo,
+          table_no: tableNo,
+          customer_name: actualCustomerName,
+          transaction_note: transactionNote,
+          date: txDataConfig.date,
+          isAdditional: false
+        },
+        itemsToPrint: [...cart],
+        isAdditional: false,
+        addedCount: 0,
+        transaction: txDataConfig,
+        cart: [...cart],
+        totals: { ...totals },
+        initialReceiptPrinted: autoReceiptPrinted,
+        hardwareName: getConnectedPrinterName() || "Printer Bluetooth / Sistem"
+      });
+      setPrintModalOpen(true);
 
       setCart([]);
       setTableNo("");
       setCustomerName("");
       setTransactionNote("");
+      setOpenBillId(null);
+      originalBillItemsRef.current = [];
       setShowPayment(false);
       setCashAmount("");
       setSplitPayments([{ method: paymentMethodsList[0]?.name || 'Cash', amount: '' }]);
@@ -775,6 +857,56 @@ function POS() {
       const actualCustomerName = customerName || "Guest";
       const finalCustomerName = transactionNote ? `${actualCustomerName} - Note: ${transactionNote}` : actualCustomerName;
       const finalTableNo = selectedPromoId ? `${tableNo}|PROMO:${selectedPromoId}` : tableNo;
+      
+      // Calculate delta / added items for Captain Order
+      let storedPrinted = {};
+      if (openBillId) {
+        try {
+          const str = localStorage.getItem('captain_printed_' + openBillId);
+          if (str) {
+            storedPrinted = JSON.parse(str);
+          }
+        } catch (e) {
+          console.warn("Failed parsing printed map:", e);
+        }
+        if (Object.keys(storedPrinted).length === 0 && originalBillItemsRef.current.length > 0) {
+          originalBillItemsRef.current.forEach(item => {
+            const sig = getItemSignature(item);
+            storedPrinted[sig] = (storedPrinted[sig] || 0) + item.qty;
+          });
+        }
+      }
+
+      let itemsToPrint = [];
+      let isAdditional = false;
+      let addedCount = 0;
+
+      if (openBillId && Object.keys(storedPrinted).length > 0) {
+        cart.forEach(item => {
+          const sig = getItemSignature(item);
+          const prevQty = storedPrinted[sig] || 0;
+          const delta = item.qty - prevQty;
+          if (delta > 0) {
+            itemsToPrint.push({
+              ...item,
+              qty: delta
+            });
+            addedCount += delta;
+          }
+        });
+        if (itemsToPrint.length > 0) {
+          isAdditional = true;
+        } else {
+          // If no delta items found, provide all cart items
+          itemsToPrint = [...cart];
+          isAdditional = false;
+          addedCount = 0;
+        }
+      } else {
+        itemsToPrint = [...cart];
+        isAdditional = false;
+        addedCount = cart.reduce((s, i) => s + (i.qty || 1), 0);
+      }
 
       if (openBillId) {
         // Update existing open bill
@@ -814,17 +946,23 @@ function POS() {
         billId = newBill.bill_id;
       }
       
-      // Insert items
-      const billItems = cart.map(item => ({
+      // Insert items with modifiers encoded
+      const billItems = cart.map(item => {
+        let finalName = item.menu_name || "";
+        if (item.drink_type && !finalName.includes(`[${item.drink_type}]`)) finalName += ` [${item.drink_type}]`;
+        if (item.sugar_level && !finalName.includes(`[${item.sugar_level} Sugar]`)) finalName += ` [${item.sugar_level} Sugar]`;
+        if (item.note && !finalName.includes(`(Note: ${item.note})`)) finalName += ` (Note: ${item.note})`;
+        return {
         bill_id: billId,
         menu_id: item.menu_id,
-        menu_name: item.note ? `${item.menu_name} (Note: ${item.note})` : item.menu_name,
+        menu_name: finalName,
         qty: item.qty,
         price: item.price,
         subtotal: item.subtotal,
         addons: item.addons,
         is_auto_free: item.is_auto_free || false
-      }));
+       };
+      });
       
       const { error: itemsError } = await supabase
         .from('open_bill_items')
@@ -832,11 +970,46 @@ function POS() {
         
       if (itemsError) throw itemsError;
 
-      alert("Open bill saved!");
+            // Update printed counts for this billId with current cart totals
+      const currentCartMap = {};
+      cart.forEach(item => {
+        const sig = getItemSignature(item);
+        currentCartMap[sig] = (currentCartMap[sig] || 0) + item.qty;
+      });
+      try {
+        localStorage.setItem('captain_printed_' + billId, JSON.stringify(currentCartMap));
+      } catch (e) {}
+
+      // Open print popup trigger modal for captain order (without print receipt)
+      setPrintModalConfig({
+        type: "save_bill",
+        title: "Bill saved successfully",
+        subtitle: "Choose what to print on your single printer.",
+        orderInfo: {
+          bill_id: billId,
+          table_no: tableNo,
+          customer_name: actualCustomerName,
+          transaction_note: transactionNote,
+          date: moment().tz(TIMEZONE).format("YYYY-MM-DD HH:mm:ss"),
+          isAdditional: isAdditional
+        },
+        itemsToPrint: itemsToPrint,
+        isAdditional: isAdditional,
+        addedCount: addedCount,
+        transaction: null,
+        cart: [...cart],
+        totals: { ...totals },
+        initialReceiptPrinted: false,
+        hardwareName: getConnectedPrinterName() || "Printer Bluetooth / Sistem"
+      });
+      setPrintModalOpen(true);
+
       setCart([]);
       setTableNo("");
       setCustomerName("");
+      setTransactionNote("");
       setOpenBillId(null);
+      originalBillItemsRef.current = [];
     } catch (err) {
       if (err.message === "Failed to fetch" || (err.message && err.message.includes("fetch"))) {
         alert("Failed to save open bill: Failed to connect to database. Please make sure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are correctly set in the Secrets panel.");
@@ -1371,6 +1544,40 @@ function POS() {
             </div>
           </div>
         </div>}
+    
+      {/* Print Trigger Modal (Receipt & Captain Order) */}
+      {printModalOpen && printModalConfig && (
+        <PrintTriggerModal
+          isOpen={printModalOpen}
+          onClose={() => setPrintModalOpen(false)}
+          type={printModalConfig.type}
+          title={printModalConfig.title}
+          subtitle={printModalConfig.subtitle}
+          isAdditional={printModalConfig.isAdditional}
+          addedCount={printModalConfig.addedCount}
+          hardwareName={printModalConfig.hardwareName}
+          initialReceiptPrinted={printModalConfig.initialReceiptPrinted}
+          onPrintReceipt={async () => {
+            if (printModalConfig.transaction && printModalConfig.cart) {
+              await printCustomerReceipt(
+                storeProfile,
+                printModalConfig.transaction,
+                printModalConfig.cart,
+                printModalConfig.totals
+              );
+            }
+          }}
+          onPrintCaptainOrder={async () => {
+            if (printModalConfig.orderInfo && printModalConfig.itemsToPrint) {
+              await printCaptainOrder(
+                storeProfile,
+                printModalConfig.orderInfo,
+                printModalConfig.itemsToPrint
+              );
+            }
+          }}
+        />
+      )}
     </div>;
 }
 export {

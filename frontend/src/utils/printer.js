@@ -986,3 +986,414 @@ export const printSettlementReceipt = async (settlementData, options = {}) => {
   return { success: true, method: "browser" };
 };
 
+export const getItemSignature = (item) => {
+  const menuId = item.menu_id || item.menu_name;
+  let drink = item.drink_type || "";
+  let sugar = item.sugar_level || "";
+  let note = (item.note || "").trim().toLowerCase();
+  let addons = "";
+  if (item.addons && Array.isArray(item.addons)) {
+    addons = item.addons.map(a => `${a.addon_id || a.menu_id || a.name}`).sort().join(",");
+  }
+  return `${menuId}__${drink}__${sugar}__${note}__${addons}`;
+};
+
+export const formatCaptainOrderText = (storeProfile, orderInfo, items, options = {}) => {
+  const paperSize = options.paperSize || "58mm";
+  const WIDTH = paperSize === "80mm" ? 42 : 32;
+
+  let text = "";
+  // Reset
+  text += '\x1B\x40';
+  text += '\x1B\x21\x00'; // Font A standard
+
+  // Header - Centered
+  text += '\x1B\x61\x01';
+  text += '\x1B\x45\x01'; // Bold ON
+  text += (storeProfile?.store_name || "CAFE & RESTO") + "\n";
+  text += "*** CAPTAIN ORDER ***\n";
+  if (orderInfo.isAdditional) {
+    text += ">>> ORDER TAMBAHAN <<<\n";
+  }
+  text += '\x1B\x45\x00'; // Bold OFF
+  text += "=".repeat(WIDTH) + "\n";
+
+  // Order Details - Left align
+  text += '\x1B\x61\x00';
+  text += `Tgl : ${orderInfo.date || new Date().toLocaleString("id-ID")}\n`;
+  text += `Meja: ${orderInfo.table_no || "-"}\n`;
+  let cust = orderInfo.customer_name || "Guest";
+  text += `Cust: ${cust}\n`;
+  if (orderInfo.bill_id) {
+    text += `Bill: #${orderInfo.bill_id}\n`;
+  }
+  if (orderInfo.invoice_no) {
+    text += `Inv : #${orderInfo.invoice_no}\n`;
+  }
+  if (orderInfo.transaction_note) {
+    text += `Note: ${orderInfo.transaction_note}\n`;
+  }
+  text += "-".repeat(WIDTH) + "\n";
+
+  // Items List
+  let totalQty = 0;
+  items.forEach((item) => {
+    const q = Number(item.qty || 1);
+    totalQty += q;
+
+    let name = item.menu_name || "";
+    let note = item.note || "";
+    const noteMatch = name.match(/\(Note: (.*?)\)$/);
+    if (noteMatch) {
+      note = noteMatch[1] || note;
+      name = name.replace(/\s*\(Note: .*?\)$/, "");
+    }
+    let drinkType = item.drink_type || "";
+    let sugarLevel = item.sugar_level || "";
+    const drinkMatch = name.match(/\[(Hot|Ice)\]/);
+    if (drinkMatch) {
+      drinkType = drinkMatch[1] || drinkType;
+      name = name.replace(/\s*\[(?:Hot|Ice)\]/, "");
+    }
+    const sugarMatch = name.match(/\[(.*?) Sugar\]/);
+    if (sugarMatch) {
+      sugarLevel = sugarMatch[1] || sugarLevel;
+      name = name.replace(/\s*\[.*? Sugar\]/, "");
+    }
+
+    // Bold Item Header with prominent quantity
+    text += '\x1B\x45\x01'; // Bold
+    text += `[ ${q}x ] ${name}\n`.substring(0, WIDTH + 1);
+    text += '\x1B\x45\x00'; // Bold off
+
+    if (drinkType || sugarLevel) {
+      const opts = [];
+      if (drinkType) opts.push(drinkType);
+      if (sugarLevel) opts.push(`${sugarLevel} Sugar`);
+      text += `      - ${opts.join(", ")}\n`.substring(0, WIDTH + 1);
+    }
+
+    if (item.addons && Array.isArray(item.addons) && item.addons.length > 0) {
+      item.addons.forEach((a) => {
+        text += `      + Addon: ${a.name}\n`.substring(0, WIDTH + 1);
+      });
+    }
+
+    if (note) {
+      text += `      * NOTE: ${note}\n`.substring(0, WIDTH + 1);
+    }
+  });
+
+  text += "-".repeat(WIDTH) + "\n";
+  text += '\x1B\x45\x01';
+  if (orderInfo.isAdditional) {
+    text += `TOTAL TAMBAHAN: ${totalQty} items\n`;
+  } else {
+    text += `TOTAL ITEM    : ${totalQty} items\n`;
+  }
+  text += '\x1B\x45\x00';
+  text += "=".repeat(WIDTH) + "\n";
+
+  // Footer - Centered
+  text += '\x1B\x61\x01';
+  text += "[ KITCHEN / BAR TICKET ]\n";
+  text += "\n\n\n";
+
+  return text;
+};
+
+export const formatCaptainOrderHtml = (storeProfile, orderInfo, items) => {
+  const store = storeProfile || { store_name: "CAFE & RESTO" };
+  const totalQty = items.reduce((sum, i) => sum + Number(i.qty || 1), 0);
+
+  const itemsHtml = items.map((item) => {
+    let name = item.menu_name || "";
+    let note = item.note || "";
+    const noteMatch = name.match(/\(Note: (.*?)\)$/);
+    if (noteMatch) {
+      note = noteMatch[1] || note;
+      name = name.replace(/\s*\(Note: .*?\)$/, "").trim();
+    }
+    let drinkType = item.drink_type || "";
+    let sugarLevel = item.sugar_level || "";
+    const drinkMatch = name.match(/\[(Hot|Ice)\]/);
+    if (drinkMatch) {
+      drinkType = drinkMatch[1] || drinkType;
+      name = name.replace(/\s*\[(?:Hot|Ice)\]/, "").trim();
+    }
+    const sugarMatch = name.match(/\[(.*?) Sugar\]/);
+    if (sugarMatch) {
+      sugarLevel = sugarMatch[1] || sugarLevel;
+      name = name.replace(/\s*\[.*? Sugar\]/, "").trim();
+    }
+
+    const optionsStr = [drinkType, sugarLevel ? `${sugarLevel} Sugar` : ""].filter(Boolean).join(", ");
+    const addonsList = item.addons && Array.isArray(item.addons) ? item.addons.map(a => a.name).join(", ") : "";
+
+    return `
+      <div class="py-1.5 border-b border-dashed border-gray-300">
+        <div class="font-bold text-sm text-black flex items-start">
+          <span class="inline-block bg-black text-white px-1.5 py-0.5 rounded text-xs mr-1.5 shrink-0">${item.qty}x</span>
+          <span class="break-words">${name}</span>
+        </div>
+        ${optionsStr ? `<div class="text-xs text-gray-700 pl-7 mt-0.5">- ${optionsStr}</div>` : ""}
+        ${addonsList ? `<div class="text-xs text-gray-700 pl-7 mt-0.5">+ Addon: ${addonsList}</div>` : ""}
+        ${note ? `<div class="text-xs font-semibold text-gray-900 pl-7 mt-0.5">* NOTE: ${note}</div>` : ""}
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div style="font-family: 'Courier New', Courier, monospace; width: 100%;">
+      <div class="text-center mb-2">
+        <div class="font-bold text-sm uppercase tracking-wider text-black">${store.store_name}</div>
+        <div class="font-bold text-xs uppercase tracking-widest mt-0.5 text-black">*** CAPTAIN ORDER ***</div>
+        ${orderInfo.isAdditional ? '<div class="font-black text-xs text-black mt-0.5">>>> ORDER TAMBAHAN <<<</div>' : ''}
+      </div>
+
+      <div class="divider-double"></div>
+
+      <div class="text-xs space-y-0.5 my-1.5 text-black">
+        <div><span class="font-bold">Tgl :</span> ${orderInfo.date || new Date().toLocaleString("id-ID")}</div>
+        <div><span class="font-bold">Meja:</span> ${orderInfo.table_no || "-"}</div>
+        <div><span class="font-bold">Cust:</span> ${orderInfo.customer_name || "Guest"}</div>
+        ${orderInfo.bill_id ? `<div><span class="font-bold">Bill:</span> #${orderInfo.bill_id}</div>` : ''}
+        ${orderInfo.invoice_no ? `<div><span class="font-bold">Inv :</span> #${orderInfo.invoice_no}</div>` : ''}
+        ${orderInfo.transaction_note ? `<div><span class="font-bold">Note:</span> ${orderInfo.transaction_note}</div>` : ''}
+      </div>
+
+      <div class="divider-single"></div>
+
+      <div class="my-2">
+        ${itemsHtml}
+      </div>
+
+      <div class="divider-single"></div>
+
+      <div class="flex justify-between items-center font-bold text-xs text-black my-1.5">
+        <span>${orderInfo.isAdditional ? "TOTAL TAMBAHAN" : "TOTAL ITEM"}</span>
+        <span>${totalQty} items</span>
+      </div>
+
+      <div class="divider-double"></div>
+
+      <div class="text-center text-xs text-black font-bold my-1">
+        [ KITCHEN / BAR TICKET ]
+      </div>
+    </div>
+  `;
+};
+
+export const formatReceiptHtml = (storeProfile, transaction, cart, totals) => {
+  const store = storeProfile || { store_name: "CAFE & RESTO", address: "BSD City, Tangerang" };
+  const formatCurrency = (num) => "Rp " + Number(num || 0).toLocaleString('id-ID');
+
+  let custName = transaction.customer_name || "Guest";
+  let txNote = transaction.transaction_note || "";
+  if (custName && !txNote) {
+    const txNoteMatch = custName.match(/ - Note: ([\s\S]*)$/);
+    if (txNoteMatch) {
+      txNote = txNoteMatch[1];
+      custName = custName.replace(/\s*- Note: [\s\S]*$/, "");
+    }
+  }
+
+  const itemsHtml = cart.map((item) => {
+    let name = item.menu_name || "";
+    let note = item.note || "";
+    const noteMatch = name.match(/\(Note: (.*?)\)$/);
+    if (noteMatch) {
+      note = noteMatch[1] || note;
+      name = name.replace(/\s*\(Note: .*?\)$/, "").trim();
+    }
+    let drinkType = item.drink_type || "";
+    let sugarLevel = item.sugar_level || "";
+    const drinkMatch = name.match(/\[(Hot|Ice)\]/);
+    if (drinkMatch) {
+      drinkType = drinkMatch[1] || drinkType;
+      name = name.replace(/\s*\[(?:Hot|Ice)\]/, "").trim();
+    }
+    const sugarMatch = name.match(/\[(.*?) Sugar\]/);
+    if (sugarMatch) {
+      sugarLevel = sugarMatch[1] || sugarLevel;
+      name = name.replace(/\s*\[.*? Sugar\]/, "").trim();
+    }
+
+    const optionsStr = [drinkType, sugarLevel ? `${sugarLevel} Sugar` : ""].filter(Boolean).join(", ");
+    const addonsList = item.addons && Array.isArray(item.addons) ? item.addons.map(a => a.name).join(", ") : "";
+
+    return `
+      <div class="py-1 border-b border-gray-100">
+        <div class="font-bold text-xs text-black break-words">${name}</div>
+        ${optionsStr ? `<div class="text-[10px] text-gray-600 pl-2">- ${optionsStr}</div>` : ""}
+        ${addonsList ? `<div class="text-[10px] text-gray-600 pl-2">+ Addon: ${addonsList}</div>` : ""}
+        ${note ? `<div class="text-[10px] text-gray-700 pl-2">* Note: ${note}</div>` : ""}
+        <div class="flex justify-between items-center text-xs mt-0.5">
+          <span>${item.qty}x ${formatCurrency(item.price)} ${item.is_auto_free ? '(FREE)' : ''}</span>
+          <span class="font-medium">${formatCurrency(item.subtotal)}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div style="font-family: 'Courier New', Courier, monospace; width: 100%;">
+      <!-- Header -->
+      <div class="text-center mb-2">
+        <div class="font-bold text-sm uppercase text-black">${store.store_name}</div>
+        ${store.address ? `<div class="text-xs text-gray-600 mt-0.5">${store.address}</div>` : ''}
+        ${store.phone ? `<div class="text-xs text-gray-600">Telp: ${store.phone}</div>` : ''}
+      </div>
+
+      <div class="divider-single"></div>
+
+      <!-- Info -->
+      <div class="text-xs space-y-0.5 my-1 text-black">
+        <div><span class="font-bold">Inv :</span> #${transaction.invoice_no}</div>
+        <div><span class="font-bold">Date:</span> ${transaction.date}</div>
+        <div><span class="font-bold">Cust:</span> ${custName}</div>
+        <div><span class="font-bold">Type:</span> ${transaction.table_no}</div>
+      </div>
+
+      <div class="divider-single"></div>
+
+      <!-- Items -->
+      <div class="my-1">
+        ${itemsHtml}
+      </div>
+
+      <div class="divider-single"></div>
+
+      <!-- Totals -->
+      <div class="text-xs space-y-0.5 my-1 text-black">
+        <div class="flex justify-between">
+          <span>Subtotal</span>
+          <span>${formatCurrency(totals.subtotal)}</span>
+        </div>
+        <div class="flex justify-between">
+          <span>Tax</span>
+          <span>${formatCurrency(totals.tax)}</span>
+        </div>
+        ${totals.discount > 0 ? `
+        <div class="flex justify-between text-green-700">
+          <span>Discount</span>
+          <span>-${formatCurrency(totals.discount)}</span>
+        </div>` : ''}
+        <div class="border-t border-dashed border-gray-800 pt-1 flex justify-between font-bold text-sm text-black">
+          <span>Total</span>
+          <span>${formatCurrency(totals.total)}</span>
+        </div>
+      </div>
+
+      <div class="divider-single"></div>
+
+      <div class="text-xs space-y-0.5 my-1 text-black">
+        <div><span class="font-bold">Payment:</span> ${transaction.payment_method}</div>
+        ${transaction.cash_amount ? `
+        <div class="flex justify-between">
+          <span>Cash</span>
+          <span>${formatCurrency(transaction.cash_amount)}</span>
+        </div>
+        <div class="flex justify-between">
+          <span>Change</span>
+          <span>${formatCurrency(transaction.change_amount)}</span>
+        </div>` : ''}
+        ${txNote ? `<div class="mt-1"><span class="font-bold">Note:</span> ${txNote}</div>` : ''}
+      </div>
+
+      <div class="divider-single"></div>
+
+      <div class="text-center my-2 space-y-0.5 text-xs text-black">
+        <div class="font-semibold">Thank You</div>
+        <div class="text-[11px] text-gray-700">Please Come Again</div>
+      </div>
+    </div>
+  `;
+};
+
+export const printCaptainOrder = async (storeProfile, orderInfo, items, options = {}) => {
+  const paperSize = options.paperSize || "58mm";
+
+  let escPosText = "";
+  try {
+    escPosText = formatCaptainOrderText(storeProfile, orderInfo, items, { paperSize });
+  } catch (err) {
+    console.error("Error formatting captain order ESC/POS:", err);
+  }
+
+  // 1. Try Bluetooth if connected
+  const hasActiveBt = isBluetoothConnected();
+  if (hasActiveBt && escPosText) {
+    try {
+      await printViaBluetooth(escPosText);
+      return { success: true, method: "bluetooth" };
+    } catch (btErr) {
+      console.warn("Active Bluetooth print failed, falling back to browser print:", btErr);
+      const html = formatCaptainOrderHtml(storeProfile, orderInfo, items);
+      printThermalReceiptIframe(html, { paperSize });
+      return { success: true, method: "browser", fallbackReason: btErr.message };
+    }
+  }
+
+  // 2. Try Bluetooth device if browser supports
+  if (typeof navigator !== "undefined" && navigator.bluetooth && escPosText) {
+    try {
+      await printViaBluetooth(escPosText);
+      return { success: true, method: "bluetooth" };
+    } catch (btErr) {
+      console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
+      const html = formatCaptainOrderHtml(storeProfile, orderInfo, items);
+      printThermalReceiptIframe(html, { paperSize });
+      return { success: true, method: "browser", fallbackReason: btErr.message };
+    }
+  }
+
+  // 3. Fallback to browser iframe print
+  const html = formatCaptainOrderHtml(storeProfile, orderInfo, items);
+  printThermalReceiptIframe(html, { paperSize });
+  return { success: true, method: "browser" };
+};
+
+export const printCustomerReceipt = async (storeProfile, transaction, cart, totals, options = {}) => {
+  const paperSize = options.paperSize || "58mm";
+
+  let escPosText = "";
+  try {
+    escPosText = formatReceiptText(storeProfile, transaction, cart, totals);
+  } catch (err) {
+    console.error("Error formatting receipt ESC/POS:", err);
+  }
+
+  // 1. Try Bluetooth if active
+  const hasActiveBt = isBluetoothConnected();
+  if (hasActiveBt && escPosText) {
+    try {
+      await printViaBluetooth(escPosText);
+      return { success: true, method: "bluetooth" };
+    } catch (btErr) {
+      console.warn("Active Bluetooth print failed, falling back to browser print:", btErr);
+      const html = formatReceiptHtml(storeProfile, transaction, cart, totals);
+      printThermalReceiptIframe(html, { paperSize });
+      return { success: true, method: "browser", fallbackReason: btErr.message };
+    }
+  }
+
+  // 2. Try Bluetooth if available
+  if (typeof navigator !== "undefined" && navigator.bluetooth && escPosText) {
+    try {
+      await printViaBluetooth(escPosText);
+      return { success: true, method: "bluetooth" };
+    } catch (btErr) {
+      console.warn("Bluetooth print failed or cancelled, falling back to browser print:", btErr);
+      const html = formatReceiptHtml(storeProfile, transaction, cart, totals);
+      printThermalReceiptIframe(html, { paperSize });
+      return { success: true, method: "browser", fallbackReason: btErr.message };
+    }
+  }
+
+  // 3. Fallback to browser iframe print
+  const html = formatReceiptHtml(storeProfile, transaction, cart, totals);
+  printThermalReceiptIframe(html, { paperSize });
+  return { success: true, method: "browser" };
+};
+
