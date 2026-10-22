@@ -127,7 +127,9 @@ export const fetchSettlementData = async (supabase, dateStr, categoryFilter = "A
     if (t.notes) {
       try {
         const parsed = JSON.parse(t.notes);
-        if (parsed && Array.isArray(parsed.refundedItems)) {
+        if (parsed && Array.isArray(parsed.refundHistory) && parsed.refundHistory.length > 0) {
+          refundedItems = parsed.refundHistory.flatMap(h => h.refundedItems || []);
+        } else if (parsed && Array.isArray(parsed.refundedItems)) {
           refundedItems = parsed.refundedItems;
         }
       } catch (e) {}

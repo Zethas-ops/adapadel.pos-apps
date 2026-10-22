@@ -164,11 +164,59 @@ function History() {
         };
       });
 
-      const finalNotes = JSON.stringify({
-        reason: refundReason,
+      const refundedSubtotal = refundedItems.reduce((sum, item) => {
+        const refundQty = selectedRefundItems[item.item_id] || 0;
+        const itemPrice = Number(item.subtotal || 0) / Number(item.qty);
+        return sum + (itemPrice * refundQty);
+      }, 0);
+
+      // Parse existing refund history so previous refund records are NEVER lost
+      let existingRefundHistory = [];
+      if (transactionToRefund.notes) {
+        try {
+          const parsed = typeof transactionToRefund.notes === "string" && transactionToRefund.notes.startsWith("{")
+            ? JSON.parse(transactionToRefund.notes)
+            : (typeof transactionToRefund.notes === "object" ? transactionToRefund.notes : null);
+
+          if (parsed && typeof parsed === "object") {
+            if (Array.isArray(parsed.refundHistory)) {
+              existingRefundHistory = [...parsed.refundHistory];
+            } else if (Array.isArray(parsed.refundedItems) && parsed.refundedItems.length > 0) {
+              // Convert legacy single refund format into initial history item
+              existingRefundHistory = [{
+                refundId: "refund-1",
+                refundedAt: parsed.refundedAt || transactionToRefund.date,
+                reason: parsed.reason || "Refund",
+                refundedBy: parsed.refundedBy || "Unknown",
+                refundedItems: parsed.refundedItems,
+                refundAmount: parsed.refundedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
+              }];
+            }
+          }
+        } catch (e) {
+          console.warn("Could not parse existing notes as JSON:", e);
+        }
+      }
+
+      // Create current refund record and append to history
+      const currentRefundRecord = {
+        refundId: `refund-${Date.now()}`,
+        refundedAt: moment().tz(TIMEZONE).format("YYYY-MM-DD HH:mm:ss"),
+        reason: refundReason.trim(),
+        refundedBy: user?.username || user?.name || "Unknown",
         refundedItems: refundedItemsList,
+        refundAmount: refundedSubtotal
+      };
+
+      const updatedRefundHistory = [...existingRefundHistory, currentRefundRecord];
+      const allRefundedItems = updatedRefundHistory.flatMap(h => h.refundedItems || []);
+
+      const finalNotes = JSON.stringify({
+        reason: currentRefundRecord.reason,
+        refundedItems: allRefundedItems,
+        refundHistory: updatedRefundHistory,
         isPartial: isPartial,
-        refundedBy: user?.username || user?.name || "Unknown"
+        refundedBy: currentRefundRecord.refundedBy
       });
 
         const newStatus = isPartial ? 'COMPLETED' : 'REFUND';
@@ -176,12 +224,6 @@ function History() {
       const originalSubtotal = Number(transactionToRefund.subtotal || 0);
       const originalTax = Number(transactionToRefund.tax || 0);
       const originalDiscount = Number(transactionToRefund.discount || 0);
-      
-      const refundedSubtotal = refundedItems.reduce((sum, item) => {
-      const refundQty = selectedRefundItems[item.item_id] || 0;
-      const itemPrice = Number(item.subtotal || 0) / Number(item.qty);
-      return sum + (itemPrice * refundQty);
-      }, 0);     
 
       let newSubtotal = originalSubtotal - refundedSubtotal;
       if (newSubtotal < 0) newSubtotal = 0;
@@ -399,20 +441,28 @@ function History() {
                     <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg text-sm font-medium inline-block break-words w-full">
                       {t.payment_method}
                     </span>
-                    {t.status && (t.status === 'REFUND' || t.status === 'VOID') && (
+                    {t.status && (t.status === 'REFUND' || t.status === 'VOID') && (() => {
+                      let parsedNotes = null;
+                      if (t.notes && t.notes.startsWith('{')) {
+                        try { parsedNotes = JSON.parse(t.notes); } catch(e) {}
+                      }
+                      const count = Array.isArray(parsedNotes?.refundHistory) ? parsedNotes.refundHistory.length : 1;
+                      return (
                       <span className="mt-2 px-2 py-1 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded text-xs font-bold block w-fit">
-                        {t.status}
+                        {t.status} {t.status === 'REFUND' && count > 1 ? `(${count}x)` : ''}
                       </span>
-                    )}
+                    );
+                    })()}
                     {t.status === 'COMPLETED' && (() => {
                       let parsedNotes = null;
                       if (t.notes && t.notes.startsWith('{')) {
                         try { parsedNotes = JSON.parse(t.notes); } catch(e) {}
                       }
-                      if (parsedNotes && parsedNotes.isPartial) {
+                      if (parsedNotes && (parsedNotes.isPartial || (Array.isArray(parsedNotes.refundHistory) && parsedNotes.refundHistory.length > 0))) {
+                        const count = Array.isArray(parsedNotes?.refundHistory) ? parsedNotes.refundHistory.length : 1;
                         return (
                           <span className="mt-2 px-2 py-1 bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 rounded text-xs font-bold block w-fit">
-                            PARTIAL REFUND
+                            PARTIAL REFUND {count > 1 ? `(${count}x)` : ''}
                           </span>
                         );
                       }
@@ -433,6 +483,7 @@ function History() {
                       </button>
                       {isAdmin && (
                         <>
+                        {t.status !== 'REFUND' && t.status !== 'VOID' && t.items && t.items.length > 0 && (
                           <button
                             onClick={(e) => initiateRefund(t, e)}
                             className="p-2 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:bg-orange-900/30 rounded-lg transition-colors inline-flex items-center"
@@ -440,6 +491,7 @@ function History() {
                           >
                             <RefreshCcw size={20} />
                           </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -449,11 +501,23 @@ function History() {
                   let parsedNotes = null;
                   if (t.notes) {
                     try {
-                      if (t.notes.startsWith('{')) parsedNotes = JSON.parse(t.notes);
+                      if (typeof t.notes === 'string' && t.notes.startsWith('{')) parsedNotes = JSON.parse(t.notes);
+                      else if (typeof t.notes === 'object') parsedNotes = t.notes;
                     } catch(e) {}
                   }
                   const isJSONNotes = typeof parsedNotes === 'object' && parsedNotes !== null;
-                  const displayReason = isJSONNotes ? parsedNotes.reason : t.notes;
+                  const refundHistory = Array.isArray(parsedNotes?.refundHistory) && parsedNotes.refundHistory.length > 0
+                    ? parsedNotes.refundHistory
+                    : (parsedNotes?.refundedItems && parsedNotes.refundedItems.length > 0
+                        ? [{
+                            refundId: "refund-1",
+                            refundedAt: parsedNotes.refundedAt || t.date,
+                            reason: parsedNotes.reason || "Refund",
+                            refundedBy: parsedNotes.refundedBy || "Unknown",
+                            refundedItems: parsedNotes.refundedItems,
+                            refundAmount: parsedNotes.refundedItems.reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
+                          }]
+                        : []);
 
                   return (
                     <tr className="bg-gray-50 dark:bg-gray-900 border-b border-gray-100 dark:border-gray-800">
@@ -461,19 +525,22 @@ function History() {
                       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
                         <div className="flex justify-between items-center mb-4 border-b pb-2 border-gray-200 dark:border-gray-700">
                           <h4 className="font-semibold text-gray-800 dark:text-gray-100">Order Details</h4>
-                          {displayReason && (
-                              <div className="text-sm px-3 py-1 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg max-w-sm text-right flex flex-col items-end">
-                                <div><strong>{isJSONNotes && parsedNotes.isPartial ? 'Partial Refund Reason' : 'Refund/Void Reason'}:</strong> {displayReason}</div>
-                                {isJSONNotes && parsedNotes.refundedBy && (
-                                  <div className="text-xs mt-1 opacity-80">
-                                    Refunded by: {parsedNotes.refundedBy}
+                          {refundHistory.length > 0 ? (
+                              <div className="text-xs px-3 py-1.5 bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded-lg text-right font-medium">
+                                <span>{t.status === 'REFUND' ? 'Refunded' : 'Partial Refund'}</span>
+                                <span className="ml-1 opacity-80">({refundHistory.length}x catatan refund)</span>
                                   </div>
-                                )}
+                                ) : t.notes ? (
+                              <div className="text-xs px-3 py-1 bg-gray-50 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded-lg">
+                                <strong>Note:</strong> {t.notes}
                             </div>
-                          )}
+                          ) : null}
                         </div>
+                        
+                          {/* Active Items */}
                         <div className="space-y-3">
-                          {t.items.map((item, idx) => (
+                          {t.items && t.items.length > 0 ? (
+                              t.items.map((item, idx) => (
                               <div key={idx} className="flex justify-between items-start">
                               <div>
                                 <p className="font-medium text-gray-800 dark:text-gray-100">
@@ -491,17 +558,56 @@ function History() {
                               </div>
                               <p className="font-medium text-gray-800 dark:text-gray-100">Rp {Number(item.subtotal || 0).toLocaleString("id-ID")}</p>
                             </div>
-                            ))}
+                            ))
+                            ) : (
+                              <p className="text-sm text-gray-400 italic">Semua item telah direfund.</p>
+                            )}
                           </div>
 
-                          {isJSONNotes && parsedNotes.refundedItems && parsedNotes.refundedItems.length > 0 && (
+                          {/* Riwayat Refund (Semua Catatan Refund 1x, 2x, dst) */}
+                          {refundHistory.length > 0 && (
                             <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
-                              <h5 className="font-semibold text-red-600 dark:text-red-400 mb-2 text-sm uppercase tracking-wide">Refunded Items</h5>
-                              <div className="space-y-2">
-                                {parsedNotes.refundedItems.map((rItem, idx) => (
-                                  <div key={`refund-${idx}`} className="flex justify-between items-start text-sm text-red-500 opacity-80">
-                                    <p className="line-through">{rItem.qty}x {rItem.menu_name}</p>
-                                    <p className="line-through">Rp {Number(rItem.subtotal || 0).toLocaleString("id-ID")}</p>
+                               <div className="flex items-center justify-between mb-3">
+                                <h5 className="font-semibold text-red-600 dark:text-red-400 text-sm uppercase tracking-wide flex items-center gap-1.5">
+                                  <RefreshCcw size={15} />
+                                  Riwayat Catatan Refund ({refundHistory.length}x)
+                                </h5>
+                                <span className="text-xs font-bold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 px-2.5 py-1 rounded-full">
+                                  Total Refund: Rp {refundHistory.reduce((sum, h) => sum + Number(h.refundAmount || 0), 0).toLocaleString("id-ID")}
+                                </span>
+                              </div>
+
+                              <div className="space-y-2.5">
+                                {refundHistory.map((h, idx) => (
+                                  <div key={`refund-hist-${idx}`} className="bg-red-50/70 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-3 text-sm">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5 pb-1 border-b border-red-200/60 dark:border-red-800/60">
+                                      <div className="flex items-center gap-2">
+                                        <span className="px-2 py-0.5 bg-red-600 text-white text-[10px] font-bold rounded">
+                                          Refund #{idx + 1}
+                                        </span>
+                                        {h.refundedAt && (
+                                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                                            {moment(h.refundedAt).format("DD/MM/YYYY HH:mm")}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-gray-600 dark:text-gray-300">
+                                        Oleh: <strong className="text-gray-800 dark:text-gray-100">{h.refundedBy || "Unknown"}</strong>
+                                      </div>
+                                    </div>
+
+                                    <div className="text-xs text-red-700 dark:text-red-300 mb-2">
+                                      <strong>Alasan:</strong> {h.reason || "-"}
+                                    </div>
+
+                                    <div className="space-y-1">
+                                      {h.refundedItems?.map((rItem, rIdx) => (
+                                        <div key={`ri-${rIdx}`} className="flex justify-between items-center text-xs text-red-600 dark:text-red-400">
+                                          <span className="line-through">{rItem.qty}x {rItem.menu_name}</span>
+                                          <span className="font-semibold line-through">Rp {Number(rItem.subtotal || 0).toLocaleString("id-ID")}</span>
+                                        </div>
+                                      ))}
+                                    </div>
                                   </div>
                                 ))}
                               </div>
