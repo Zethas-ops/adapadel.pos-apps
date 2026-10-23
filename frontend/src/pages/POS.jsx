@@ -693,7 +693,7 @@ function POS() {
         }
         const initialNotes = JSON.stringify(notesObj);
 
-      const { data: transaction, error: txError } = await supabase
+      const { data: newTx, error: txError } = await supabase
         .from('transactions')
         .insert([{
           table_no: tableNo,
@@ -713,7 +713,7 @@ function POS() {
         .single();
 
       if (txError) throw txError;
-      transaction = newTx;
+      transaction = newTx;   // sekarang valid
 
       // 2. Create transaction items
       const txItems = cart.map(item => {

@@ -549,11 +549,20 @@ function History() {
                                 <span>{t.status === 'REFUND' ? 'Refunded' : 'Partial Refund'}</span>
                                 <span className="ml-1 opacity-80">({refundHistory.length}x catatan refund)</span>
                                   </div>
-                                ) : t.notes ? (
-                              <div className="text-xs px-3 py-1 bg-gray-50 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded-lg">
-                                <strong>Note:</strong> {t.notes}
-                            </div>
-                          ) : null}
+                                ) : (() => {
+                                  const displayNote = isJSONNotes
+      ? [
+          parsedNotes.transaction_note,
+          parsedNotes.promo_name && `Promo: ${parsedNotes.promo_name}`
+        ].filter(Boolean).join(" • ")
+      : (typeof t.notes === "string" ? t.notes : "");
+
+    return displayNote ? (
+      <div className="text-xs px-3 py-1 bg-gray-50 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded-lg">
+        <strong>Note:</strong> {displayNote}
+      </div>
+    ) : null;
+  })()}
                         </div>
                         
                           {/* Active Items */}
